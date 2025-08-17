@@ -27,10 +27,23 @@ function arcPath(v: Pt, p1: Pt, p2: Pt, r = 35) {
 }
 function todayISO() { const d = new Date(); const m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0"); return `${d.getFullYear()}-${m}-${day}`; }
 
+// === Tolerancias clínicas (±2° y ±1mm; % usa ±2 unidades) ===
+function toleranceForUnits(units: string): number | null {
+  if (units.includes("°")) return 2;
+  if (units.includes("mm")) return 1;
+  if (units.includes("%")) return 2; // criterio práctico
+  return null;
+}
+function interpWithTolerance(val: number, mean: number, units: string, enabled = true) {
+  if (!enabled || Number.isNaN(val)) return "—";
+  const tol = toleranceForUnits(units); if (tol == null) return "—";
+  const d = val - mean; if (Math.abs(d) <= tol) return "normal"; return d > 0 ? "mayor" : "menor";
+}
+
 // Types
 type Pt = { x: number; y: number };
 
-type LandmarkKey = "S"|"N"|"A"|"B"|"Po"|"Or"|"Go"|"Me"|"Pg"|"Gn"|"Ar"|"U1T"|"U1A"|"L1T"|"L1A";
+type LandmarkKey = "S"|"N"|"A"|"B"|"Po"|"Or"|"Go"|"Me"|"Pg"|"Gn"|"Ar"|"U1T"|"U1A"|"L1T"|"L1A"|"Prn"|"PgS"|"Li"; // + tejidos blandos
 
 const LANDMARKS: { key: LandmarkKey; label: string; desc: string }[] = [
   { key: "S", label: "S – Sella", desc: "Centro de la silla turca" },
@@ -48,11 +61,15 @@ const LANDMARKS: { key: LandmarkKey; label: string; desc: string }[] = [
   { key: "U1A", label: "U1A – Incisivo sup. ápice", desc: "Ápice radicular incisivo superior" },
   { key: "L1T", label: "L1T – Incisivo inf. borde", desc: "Borde incisal incisivo inferior" },
   { key: "L1A", label: "L1A – Incisivo inf. ápice", desc: "Ápice radicular incisivo inferior" },
+  { key: "Prn", label: "Prn – Pronasale (punta de la nariz)", desc: "Punto más anterior del dorso nasal blando" },
+  { key: "PgS", label: "Pg' – Pogonion blando", desc: "Pogonion de tejidos blandos" },
+  { key: "Li", label: "Li – Labrale inferius", desc: "Punto más anterior del labio inferior" },
 ];
 
 const DEFAULT_NORMS = {
   steiner: { SNA:{mean:82,sd:3}, SNB:{mean:80,sd:3}, ANB:{mean:2,sd:2}, SN_GoGn:{mean:32,sd:5}, U1_NA_deg:{mean:22,sd:6}, U1_NA_mm:{mean:4,sd:2}, L1_NB_deg:{mean:25,sd:6}, L1_NB_mm:{mean:4,sd:2}, Interincisal:{mean:131,sd:6}, Pg_NB_mm:{mean:0,sd:2} },
-  bjork: { Saddle_NSAr:{mean:123,sd:5}, Articular_SArGo:{mean:143,sd:6}, Gonial_ArGoMe:{mean:130,sd:7}, Sum_Bjork:{mean:396,sd:6}, Jarabak_Ratio:{mean:65,sd:3} },
+  bjork:   { Saddle_NSAr:{mean:123,sd:5}, Articular_SArGo:{mean:143,sd:6}, Gonial_ArGoMe:{mean:130,sd:7}, Sum_Bjork:{mean:396,sd:6}, Jarabak_Ratio:{mean:65,sd:3} },
+  soft:    { ELine_Li_mm:{mean:-2,sd:2} } // Ricketts: labio inf. ~ -2±2 mm (adulto)
 };
 
 export default function App() {
@@ -103,15 +120,31 @@ function CephTracer() {
     console.assert(Math.abs(distance({x:0,y:0},{x:3,y:4})-5)<1e-6, "dist 3-4-5");
     const right90 = angleBetween({x:0,y:0},{x:1,y:0},{x:1,y:1}); console.assert(Math.abs(right90-90)<1e-6, "ang 90");
     const lineAng = angleBetweenLines({x:0,y:0},{x:1,y:0},{x:0,y:0},{x:0,y:1}); console.assert(Math.abs(lineAng-90)<1e-6, "angL 90");
+    const dSigned = pointLineDistanceSigned({x:0,y:1},{x:0,y:0},{x:2,y:0}); console.assert(Math.abs(dSigned + 1) < 1e-6, "pldist sign");
+    const ap = arcPath({x:0,y:0},{x:1,y:0},{x:0,y:1}); console.assert(ap.startsWith("M "), "arcPath svg");
+    // tolerancia: 1 mm normal, 2 mm -> "mayor"
+    console.assert(interpWithTolerance(5, 4, "mm") === "normal", "tol mm normal");
+    console.assert(interpWithTolerance(6.1, 4, "mm") === "mayor", "tol mm mayor");
   } catch {} }, []);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setImgSrc(String(r.result)); r.readAsDataURL(f); }
   function resetAll() { setPoints({}); setCalibClicks([]); setMmPerPx(null); }
 
+  function nextUnsetKey(current: LandmarkKey | null, tempPts: Partial<Record<LandmarkKey, Pt>>) {
+    if (!current) return null; const idx = LANDMARKS.findIndex(l => l.key === current);
+    for (let k = 1; k <= LANDMARKS.length; k++) { const j = (idx + k) % LANDMARKS.length; const key = LANDMARKS[j].key; if (!tempPts[key]) return key; }
+    return current;
+  }
+
   function onCanvasClick(e: React.MouseEvent) {
     if (!imgRef.current) return; const rect = (e.target as HTMLElement).getBoundingClientRect(); const x = e.clientX - rect.left, y = e.clientY - rect.top; const pt = {x,y};
     if (calibMode) { const next = [...calibClicks, pt].slice(-2); setCalibClicks(next); if (next.length===2) { const px = distance(next[0], next[1]); if (mmKnown>0 && px>0){ setMmPerPx(mmKnown/px); setCalibMode(false);} } return; }
-    if (placingMode && activeKey) setPoints(prev=>({ ...prev, [activeKey]: pt }));
+    if (placingMode && activeKey) {
+      const temp = { ...points, [activeKey]: pt } as Partial<Record<LandmarkKey, Pt>>;
+      setPoints(temp);
+      const nxt = nextUnsetKey(activeKey, temp);
+      setActiveKey(nxt);
+    }
   }
 
   const dragInfo = useRef<{ key: LandmarkKey | null; offset: Pt } | null>(null);
@@ -128,7 +161,7 @@ function CephTracer() {
   function onUp(){ window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); dragInfo.current=null; }
 
   const has = (k: LandmarkKey) => Boolean(points[k]);
-  const mm = (px: number) => (mmPerPx ? px * mmPerPx : px);
+  const mm = (px: number) => (mmPerPx ? px * mmPerPx : NaN);
 
   // Steiner
   const SNA = useMemo(() => (has("S")&&has("N")&&has("A"))? angleBetween(points.S!, points.N!, points.A!) : NaN, [points]);
@@ -149,6 +182,8 @@ function CephTracer() {
   const Gonial_ArGoMe = useMemo(() => (has("Ar")&&has("Go")&&has("Me"))? angleBetween(points.Ar!, points.Go!, points.Me!) : NaN, [points]);
   const Sum_Bjork = useMemo(() => (Number.isNaN(Saddle_NSAr)||Number.isNaN(Articular_SArGo)||Number.isNaN(Gonial_ArGoMe))? NaN : Saddle_NSAr+Articular_SArGo+Gonial_ArGoMe, [Saddle_NSAr,Articular_SArGo,Gonial_ArGoMe]);
   const Jarabak_Ratio = useMemo(() => (has("S")&&has("Go")&&has("N")&&has("Me"))? (distance(points.S!, points.Go!) / distance(points.N!, points.Me!)) * 100 : NaN, [points]);
+  // Ricketts – línea estética (E-line)  (signo: + delante / - detrás)
+  const ELine_Li_mm = useMemo(() => (has("Li")&&has("Prn")&&has("PgS"))? mm(pointLineDistanceSigned(points.Li!, points.Prn!, points.PgS!)) : NaN, [points, mmPerPx]);
 
   const scaleLabel = mmPerPx ? `Escala (vista): ${(1 / mmPerPx).toFixed(2)} px/mm · ${mmPerPx.toFixed(4)} mm/px` : "Sin calibrar";
 
@@ -157,25 +192,30 @@ function CephTracer() {
   function importJSON(e: React.ChangeEvent<HTMLInputElement>){ const f = e.target.files?.[0]; if(!f) return; const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(String(r.result)); if (data.points) setPoints(data.points); if (typeof data.mmPerPx === "number") setMmPerPx(data.mmPerPx); } catch { alert("JSON inválido"); } }; r.readAsText(f); }
 
   function exportCSV(){
-    const rows: string[][] = [["Medida","Valor", mmPerPx?"Unidades":"Unidades (px)", "z-score"]];
-    if (useSteiner) rows.push(["— Steiner —","","",""],
-      ["SNA", toFixedOrDash(SNA), "°", toFixedOrDash(zScore(SNA, DEFAULT_NORMS.steiner.SNA.mean, DEFAULT_NORMS.steiner.SNA.sd))],
-      ["SNB", toFixedOrDash(SNB), "°", toFixedOrDash(zScore(SNB, DEFAULT_NORMS.steiner.SNB.mean, DEFAULT_NORMS.steiner.SNB.sd))],
-      ["ANB", toFixedOrDash(ANB), "°", toFixedOrDash(zScore(ANB, DEFAULT_NORMS.steiner.ANB.mean, DEFAULT_NORMS.steiner.ANB.sd))],
-      ["SN–GoGn", toFixedOrDash(SN_GoGn), "°", toFixedOrDash(zScore(SN_GoGn, DEFAULT_NORMS.steiner.SN_GoGn.mean, DEFAULT_NORMS.steiner.SN_GoGn.sd))],
-      ["U1–NA (°)", toFixedOrDash(U1_NA_deg), "°", toFixedOrDash(zScore(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, DEFAULT_NORMS.steiner.U1_NA_deg.sd))],
-      ["U1–NA (mm)", toFixedOrDash(U1_NA_mm), mmPerPx?"mm":"px", toFixedOrDash(zScore(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd))],
-      ["L1–NB (°)", toFixedOrDash(L1_NB_deg), "°", toFixedOrDash(zScore(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, DEFAULT_NORMS.steiner.L1_NB_deg.sd))],
-      ["L1–NB (mm)", toFixedOrDash(L1_NB_mm), mmPerPx?"mm":"px", toFixedOrDash(zScore(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd))],
-      ["Interincisal", toFixedOrDash(Interincisal), "°", toFixedOrDash(zScore(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, DEFAULT_NORMS.steiner.Interincisal.sd))],
-      ["Pg–NB (±)", toFixedOrDash(Pg_NB_mm), mmPerPx?"mm":"px", toFixedOrDash(zScore(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd))]
+    const rows: string[][] = [["Medida","Valor", mmPerPx?"Unidades":"Unidades (px)", "z-score", "Interpretación"]];
+    const interp = (val:number, mean:number, units:string, enabled=true)=> interpWithTolerance(val, mean, units, enabled);
+    if (useSteiner) rows.push(["— Steiner —","","","",""],
+      ["SNA", toFixedOrDash(SNA), "°", toFixedOrDash(zScore(SNA, DEFAULT_NORMS.steiner.SNA.mean, DEFAULT_NORMS.steiner.SNA.sd)), interp(SNA, DEFAULT_NORMS.steiner.SNA.mean, "°")],
+      ["SNB", toFixedOrDash(SNB), "°", toFixedOrDash(zScore(SNB, DEFAULT_NORMS.steiner.SNB.mean, DEFAULT_NORMS.steiner.SNB.sd)), interp(SNB, DEFAULT_NORMS.steiner.SNB.mean, "°")],
+      ["ANB", toFixedOrDash(ANB), "°", toFixedOrDash(zScore(ANB, DEFAULT_NORMS.steiner.ANB.mean, DEFAULT_NORMS.steiner.ANB.sd)), interp(ANB, DEFAULT_NORMS.steiner.ANB.mean, "°")],
+      ["SN–GoGn", toFixedOrDash(SN_GoGn), "°", toFixedOrDash(zScore(SN_GoGn, DEFAULT_NORMS.steiner.SN_GoGn.mean, DEFAULT_NORMS.steiner.SN_GoGn.sd)), interp(SN_GoGn, DEFAULT_NORMS.steiner.SN_GoGn.mean, "°")],
+      ["U1–NA (°)", toFixedOrDash(U1_NA_deg), "°", toFixedOrDash(zScore(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, DEFAULT_NORMS.steiner.U1_NA_deg.sd)), interp(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, "°")],
+      ["U1–NA (mm)", toFixedOrDash(U1_NA_mm), mmPerPx?"mm":"px", mmPerPx? toFixedOrDash(zScore(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd)) : "—", mmPerPx? interp(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, "mm", true) : "—"],
+      ["L1–NB (°)", toFixedOrDash(L1_NB_deg), "°", toFixedOrDash(zScore(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, DEFAULT_NORMS.steiner.L1_NB_deg.sd)), interp(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, "°")],
+      ["L1–NB (mm)", toFixedOrDash(L1_NB_mm), mmPerPx?"mm":"px", mmPerPx? toFixedOrDash(zScore(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd)) : "—", mmPerPx? interp(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, "mm", true) : "—"],
+      ["Interincisal", toFixedOrDash(Interincisal), "°", toFixedOrDash(zScore(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, DEFAULT_NORMS.steiner.Interincisal.sd)), interp(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, "°")],
+      ["Pg–NB (±)", toFixedOrDash(Pg_NB_mm), mmPerPx?"mm":"px", mmPerPx? toFixedOrDash(zScore(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd)) : "—", mmPerPx? interp(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, "mm", true) : "—"]
     );
-    if (useBjork) rows.push(["— Björk–Jarabak —","","",""],
-      ["Saddle (N–S–Ar)", toFixedOrDash(Saddle_NSAr), "°", toFixedOrDash(zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd))],
-      ["Articular (S–Ar–Go)", toFixedOrDash(Articular_SArGo), "°", toFixedOrDash(zScore(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd))],
-      ["Gonial (Ar–Go–Me)", toFixedOrDash(Gonial_ArGoMe), "°", toFixedOrDash(zScore(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd))],
-      ["Suma Björk", toFixedOrDash(Sum_Bjork), "°", toFixedOrDash(zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd))],
-      ["Jarabak % (S–Go / N–Me)", toFixedOrDash(Jarabak_Ratio), "%", toFixedOrDash(zScore(Jarabak_Ratio, DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd))]
+    if (useBjork) rows.push(["— Björk–Jarabak —","","","",""],
+      ["Saddle (N–S–Ar)", toFixedOrDash(Saddle_NSAr), "°", toFixedOrDash(zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd)), interp(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, "°")],
+      ["Articular (S–Ar–Go)", toFixedOrDash(Articular_SArGo), "°", toFixedOrDash(zScore(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd)), interp(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, "°")],
+      ["Gonial (Ar–Go–Me)", toFixedOrDash(Gonial_ArGoMe), "°", toFixedOrDash(zScore(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd)), interp(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, "°")],
+      ["Suma Björk", toFixedOrDash(Sum_Bjork), "°", toFixedOrDash(zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd)), interp(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, "°")],
+      ["Jarabak % (S–Go/N–Me)", toFixedOrDash(Jarabak_Ratio), "%", toFixedOrDash(zScore(Jarabak_Ratio, DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd)), interp(Jarabak_Ratio, DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, "%")]
+    );
+    // Tejidos blandos
+    rows.push(["— Tejidos blandos —","","","",""],
+      ["Labio inf – E-line (±)", toFixedOrDash(ELine_Li_mm), mmPerPx?"mm":"px", mmPerPx? toFixedOrDash(zScore(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd)) : "—", mmPerPx? interp(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, "mm", true) : "—"]
     );
     const csv = rows.map(r=>r.join(",")).join("\r\n"); setLastCSV(csv); triggerDownload(new Blob([csv], {type:"text/csv;charset=utf-8"}), "cefalo_resultados.csv");
   }
@@ -189,7 +229,7 @@ function CephTracer() {
     if (!natW || !natH || !renW || !renH) { alert("La imagen aún no está lista para exportar."); return null; }
     const sx = natW / renW, sy = natH / renH; // factor de escala render->natural
 
-    const sidebarW = 420, pad = 24; const W = natW + sidebarW + pad * 2, H = natH + pad * 2;
+    const sidebarW = 440, pad = 24; const W = natW + sidebarW + pad * 2, H = natH + pad * 2;
     const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H; const ctx = canvas.getContext("2d")!;
     ctx.fillStyle = "#0b1220"; ctx.fillRect(0, 0, W, H); ctx.drawImage(imgEl, pad, pad, natW, natH);
 
@@ -203,6 +243,8 @@ function CephTracer() {
 
     drawLine(P.S, P.N, "#38bdf8"); drawLine(P.N, P.A, "#22c55e"); drawLine(P.N, P.B, "#f97316"); drawLine(P.Po, P.Or, "#a78bfa", true); drawLine(P.Go, P.Me, "#f472b6", true); drawLine(P.Go, P.Gn, "#94a3b8");
     if (U1_axisE) drawLine(U1_axisE[0], U1_axisE[1], "#eab308"); if (L1_axisE) drawLine(L1_axisE[0], L1_axisE[1], "#22d3ee");
+    // E-line tejidos blandos
+    drawLine(P.Prn, P.PgS, "#60a5fa", true);
     Object.values(P).forEach(p=>drawPoint(p));
     drawArc(P.N, P.S, P.A, "#22c55e"); drawArc(P.N, P.S, P.B, "#f97316"); drawArc(P.N, P.A, P.B, "#38bdf8"); drawArc(P.S, P.N, P.Ar, "#16a34a"); drawArc(P.Ar, P.S, P.Go, "#d946ef"); drawArc(P.Go, P.Ar, P.Me, "#fb7185");
 
@@ -221,11 +263,11 @@ function CephTracer() {
       lineKV("ANB (°)", toFixedOrDash(ANB), zScore(ANB, DEFAULT_NORMS.steiner.ANB.mean, DEFAULT_NORMS.steiner.ANB.sd));
       lineKV("SN–GoGn (°)", toFixedOrDash(SN_GoGn), zScore(SN_GoGn, DEFAULT_NORMS.steiner.SN_GoGn.mean, DEFAULT_NORMS.steiner.SN_GoGn.sd));
       lineKV("U1–NA (°)", toFixedOrDash(U1_NA_deg), zScore(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, DEFAULT_NORMS.steiner.U1_NA_deg.sd));
-      lineKV("U1–NA (mm)", toFixedOrDash(U1_NA_mm), zScore(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd));
+      lineKV("U1–NA (mm)", toFixedOrDash(U1_NA_mm), mmPerPx? zScore(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd):NaN);
       lineKV("L1–NB (°)", toFixedOrDash(L1_NB_deg), zScore(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, DEFAULT_NORMS.steiner.L1_NB_deg.sd));
-      lineKV("L1–NB (mm)", toFixedOrDash(L1_NB_mm), zScore(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd));
+      lineKV("L1–NB (mm)", toFixedOrDash(L1_NB_mm), mmPerPx? zScore(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd):NaN);
       lineKV("Interincisal (°)", toFixedOrDash(Interincisal), zScore(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, DEFAULT_NORMS.steiner.Interincisal.sd));
-      lineKV("Pg–NB (mm)", toFixedOrDash(Pg_NB_mm), zScore(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd)); y+=6;
+      lineKV("Pg–NB (mm)", toFixedOrDash(Pg_NB_mm), mmPerPx? zScore(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd):NaN); y+=6;
     }
     if (useBjork){ ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Björk–Jarabak", x0, y); y+=18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
       lineKV("Saddle (°)", toFixedOrDash(Saddle_NSAr), zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd));
@@ -234,48 +276,79 @@ function CephTracer() {
       lineKV("Suma (°)", toFixedOrDash(Sum_Bjork), zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd));
       lineKV("Jarabak (%)", toFixedOrDash(Jarabak_Ratio), zScore(Jarabak_Ratio, DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd));
     }
+    // Tejidos blandos
+    ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Tejidos blandos", x0, y); y+=18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
+    lineKV("Labio inf – E-line (mm)", toFixedOrDash(ELine_Li_mm), mmPerPx? zScore(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd):NaN);
+
+    // Resumen clínico en lámina
+    y += 18; ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Resumen clínico", x0, y); y += 18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillStyle="#e2e8f0";
+    const wrapW = sidebarW - 32; const lh = 16; const lines = wrapText(ctx, resumen, wrapW); lines.forEach((ln)=>{ ctx.fillText(ln, x0, y); y += lh; });
+
     return canvas;
   }
 
+  function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number){
+    const words = text.split(/\s+/); const lines: string[] = []; let line = "";
+    for (let i=0;i<words.length;i++){ const test = line ? line+" "+words[i] : words[i]; const w = ctx.measureText(test).width; if (w > maxWidth && line){ lines.push(line); line = words[i]; } else { line = test; } }
+    if (line) lines.push(line); return lines;
+  }
+
   async function exportSheetPNG(){ const c = await renderSheetCanvas(); if(!c) return; const blob: Blob | null = await new Promise(res=>c.toBlob(res,"image/png")); if(!blob){ const url = c.toDataURL("image/png"); setManualLink(url, "cefalometria.png"); try{ const a=document.createElement("a"); a.href=url; a.download="cefalometria.png"; a.rel="noopener"; a.target="_blank"; document.body.appendChild(a); a.click(); a.remove(); }catch{} return;} triggerDownload(blob, "cefalometria.png"); }
-  async function exportSheetPDF(){ const c = await renderSheetCanvas(); if(!c) return; const dataUrl = c.toDataURL("image/png"); const html = `<!doctype html><html><head><meta charset=\"utf-8\"/><title>Cefalometría – PDF</title><style>@page{size:A4;margin:16mm}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:#0b1220;margin:0}.hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}.brand{font-size:12px;color:#2563eb}.meta{font-size:12px;color:#334155;margin-bottom:12px}.img{width:100%;max-width:100%}a{color:#2563eb;text-decoration:underline}</style></head><body><div class=\"hdr\"><h1 style=\"margin:0;font-size:20px\">Cefalometría</h1><div class=\"brand\"><a href=\"https://www.instagram.com/dr.juarez\" target=\"_blank\" rel=\"noopener\">by @dr.juarez</a></div></div><div class=\"meta\"><div><strong>Paciente:</strong> ${pNombre || "—"}</div><div><strong>Edad:</strong> ${pEdad ? pEdad+" años" : "—"} &nbsp; <strong>Sexo:</strong> ${pSexo || "—"}</div><div><strong>Fecha:</strong> ${pFecha || "—"} &nbsp; <strong>Doctor:</strong> ${pDoctor || "—"}</div></div><img class=\"img\" src=\"${dataUrl}\" alt=\"Lámina cefalométrica\"/><script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`; const blob = new Blob([html], {type:"text/html;charset=utf-8"}); const url = URL.createObjectURL(blob); const w = window.open(url, "_blank"); if(!w) setManualLink(url, "cefalometria.pdf.html"); }
+  async function exportSheetPDF(){ const c = await renderSheetCanvas(); if(!c) return; const dataUrl = c.toDataURL("image/png"); const html = `<!doctype html><html><head><meta charset=\"utf-8\"/><title>Cefalometría – PDF</title><style>@page{size:A4;margin:16mm}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:#0b1220;margin:0}.hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}.brand{font-size:12px;color:#2563eb}.meta{font-size:12px;color:#334155;margin-bottom:12px}.img{width:100%;max-width:100%}a{color:#2563eb;text-decoration:underline}.resumen{margin-top:10px;font-size:12px;line-height:1.5;color:#111827}</style></head><body><div class=\"hdr\"><h1 style=\"margin:0;font-size:20px\">Cefalometría</h1><div class=\"brand\"><a href=\"https://www.instagram.com/dr.juarez\" target=\"_blank\" rel=\"noopener\">by @dr.juarez</a></div></div><div class=\"meta\"><div><strong>Paciente:</strong> ${pNombre || "—"}</div><div><strong>Edad:</strong> ${pEdad ? pEdad+" años" : "—"} &nbsp; <strong>Sexo:</strong> ${pSexo || "—"}</div><div><strong>Fecha:</strong> ${pFecha || "—"} &nbsp; <strong>Doctor:</strong> ${pDoctor || "—"}</div></div><img class=\"img\" src=\"${dataUrl}\" alt=\"Lámina cefalométrica\"/><div class=\"resumen\"><strong>Resumen clínico:</strong> ${resumen}</div><script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`; const blob = new Blob([html], {type:"text/html;charset=utf-8"}); const url = URL.createObjectURL(blob); const w = window.open(url, "_blank"); if(!w) setManualLink(url, "cefalometria.pdf.html"); }
 
   // Exportar SOLO tabla de medidas (extra)
   function buildMeasuresRows(){
-    const rows: {k:string,v:string,u:string,z:string}[] = [];
-    const push = (k:string, val:number, u:string, m:number, sd:number) => rows.push({k, v: toFixedOrDash(val), u, z: toFixedOrDash(zScore(val, m, sd))});
-    if (useSteiner){ rows.push({k:"— Steiner —",v:"",u:"",z:""});
+    const rows: {k:string,v:string,u:string,z:string,i:string}[] = [];
+    const push = (k:string, val:number, u:string, m:number, sd:number, zEnabled=true) => rows.push({k, v: toFixedOrDash(val), u, z: zEnabled? toFixedOrDash(zScore(val, m, sd)) : "—", i: interpWithTolerance(val, m, u, zEnabled)});
+    if (useSteiner){ rows.push({k:"— Steiner —",v:"",u:"",z:"",i:""});
       push("SNA", SNA, "°", DEFAULT_NORMS.steiner.SNA.mean, DEFAULT_NORMS.steiner.SNA.sd);
       push("SNB", SNB, "°", DEFAULT_NORMS.steiner.SNB.mean, DEFAULT_NORMS.steiner.SNB.sd);
       push("ANB", ANB, "°", DEFAULT_NORMS.steiner.ANB.mean, DEFAULT_NORMS.steiner.ANB.sd);
       push("SN–GoGn", SN_GoGn, "°", DEFAULT_NORMS.steiner.SN_GoGn.mean, DEFAULT_NORMS.steiner.SN_GoGn.sd);
       push("U1–NA (°)", U1_NA_deg, "°", DEFAULT_NORMS.steiner.U1_NA_deg.mean, DEFAULT_NORMS.steiner.U1_NA_deg.sd);
-      push("U1–NA (mm)", U1_NA_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd);
+      push("U1–NA (mm)", U1_NA_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd, Boolean(mmPerPx));
       push("L1–NB (°)", L1_NB_deg, "°", DEFAULT_NORMS.steiner.L1_NB_deg.mean, DEFAULT_NORMS.steiner.L1_NB_deg.sd);
-      push("L1–NB (mm)", L1_NB_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd);
+      push("L1–NB (mm)", L1_NB_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd, Boolean(mmPerPx));
       push("Interincisal", Interincisal, "°", DEFAULT_NORMS.steiner.Interincisal.mean, DEFAULT_NORMS.steiner.Interincisal.sd);
-      push("Pg–NB (±)", Pg_NB_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd);
+      push("Pg–NB (±)", Pg_NB_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd, Boolean(mmPerPx));
     }
-    if (useBjork){ rows.push({k:"— Björk–Jarabak —",v:"",u:"",z:""});
+    if (useBjork){ rows.push({k:"— Björk–Jarabak —",v:"",u:"",z:"",i:""});
       push("Saddle (N–S–Ar)", Saddle_NSAr, "°", DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd);
       push("Articular (S–Ar–Go)", Articular_SArGo, "°", DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd);
       push("Gonial (Ar–Go–Me)", Gonial_ArGoMe, "°", DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd);
       push("Suma Björk", Sum_Bjork, "°", DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd);
       push("Jarabak % (S–Go/N–Me)", Jarabak_Ratio, "%", DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd);
     }
+    rows.push({k:"— Tejidos blandos —",v:"",u:"",z:"",i:""});
+    push("Labio inf – E-line (±)", ELine_Li_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd, Boolean(mmPerPx));
     return rows;
   }
 
   async function exportTablePNG(){
-    const rows = buildMeasuresRows(); const pad=24, W=600, colW = [260,110,80,90]; const titleH=60; const rowH=22; const H = titleH + pad + rows.length*rowH + pad;
+    const rows = buildMeasuresRows(); const pad=24, W=720, colW = [280,110,80,90,120]; const titleH=60; const rowH=22; const H = titleH + pad + rows.length*rowH + pad;
     const c = document.createElement("canvas"); c.width=W; c.height=H; const ctx=c.getContext("2d")!; ctx.fillStyle="#0b1220"; ctx.fillRect(0,0,W,H);
     let y = pad; ctx.fillStyle="#e2e8f0"; ctx.font="bold 20px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Tabla de medidas", pad, y); y+=22; ctx.font="12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillStyle="#93c5fd"; ctx.fillText("by @dr.juarez", pad, y); y+=16; ctx.fillStyle="#94a3b8"; ctx.fillText(`${pNombre||"—"} · ${pEdad? pEdad+" años":"—"} · ${pSexo||"—"} · ${pFecha||"—"} · Dr: ${pDoctor||"—"}`, pad, y); y+=16; ctx.strokeStyle="#1f2937"; ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke(); y+=14;
     ctx.fillStyle="#e2e8f0"; ctx.font="12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
-    rows.forEach(r=>{ if(r.u==="" && r.v==="" && r.z===""){ ctx.fillStyle="#93c5fd"; ctx.font="bold 13px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText(r.k, pad, y); ctx.font="12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillStyle="#e2e8f0"; y+=rowH; return; }
-      let x=pad; ctx.fillText(r.k, x, y); x+=colW[0]; ctx.textAlign="right"; ctx.fillText(r.v, x, y); ctx.textAlign="left"; x+=20; ctx.fillText(r.u, x, y); x+=colW[2]; ctx.fillText(r.z, x, y); y+=rowH; });
+    rows.forEach(r=>{ if(r.u==="" && r.v==="" && r.z==="" && r.i===""){ ctx.fillStyle="#93c5fd"; ctx.font="bold 13px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText(r.k, pad, y); ctx.font="12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillStyle="#e2e8f0"; y+=rowH; return; }
+      let x=pad; ctx.fillText(r.k, x, y); x+=colW[0]; ctx.textAlign="right"; ctx.fillText(r.v, x, y); ctx.textAlign="left"; x+=20; ctx.fillText(r.u, x, y); x+=colW[2]; ctx.fillText(r.z, x, y); x+=colW[3]; ctx.fillText(r.i, x, y); y+=rowH; });
     const blob: Blob | null = await new Promise(res=>c.toBlob(res, "image/png")); if (blob) triggerDownload(blob, "cefalo_tabla.png"); else setManualLink(c.toDataURL("image/png"), "cefalo_tabla.png");
   }
-  async function exportTablePDF(){ const rows = buildMeasuresRows(); const htmlRows = rows.map(r=>r.u===""&&r.v===""&&r.z===""?`<tr><td colspan=4 style=\"padding-top:6px;color:#60a5fa;font-weight:600\">${r.k}</td></tr>`:`<tr><td>${r.k}</td><td style=\"text-align:right\">${r.v}</td><td>${r.u}</td><td>${r.z}</td></tr>`).join(""); const html = `<!doctype html><html><head><meta charset=\"utf-8\"/><title>Tabla de medidas</title><style>@page{size:A4;margin:16mm}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:#0b1220;margin:0}h1{font-size:20px;margin:0 0 6px 0}.sub{color:#2563eb;font-size:12px;margin-bottom:10px}table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:12px}thead th{color:#334155;text-align:left}</style></head><body><h1>Tabla de medidas</h1><div class=\"sub\">by @dr.juarez</div><div style=\"font-size:12px;color:#334155;margin-bottom:8px\">${pNombre||"—"} · ${pEdad? pEdad+" años":"—"} · ${pSexo||"—"} · ${pFecha||"—"} · Dr: ${pDoctor||"—"}</div><table><thead><tr><th>Medida</th><th style=\"text-align:right\">Valor</th><th>Unid</th><th>z</th></tr></thead><tbody>${htmlRows}</tbody></table><script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`; const blob = new Blob([html], {type:"text/html;charset=utf-8"}); const url = URL.createObjectURL(blob); const w = window.open(url, "_blank"); if(!w) setManualLink(url, "cefalo_tabla.pdf.html"); }
+  async function exportTablePDF(){ const rows = buildMeasuresRows(); const htmlRows = rows.map(r=>r.u===""&&r.v===""&&r.z===""&&r.i===""?`<tr><td colspan=5 style="padding-top:6px;color:#60a5fa;font-weight:600">${r.k}</td></tr>`:`<tr><td>${r.k}</td><td style="text-align:right">${r.v}</td><td>${r.u}</td><td>${r.z}</td><td>${r.i}</td></tr>`).join(""); const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Tabla de medidas</title><style>@page{size:A4;margin:16mm}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:#0b1220;margin:0}h1{font-size:20px;margin:0 0 6px 0}.sub{color:#2563eb;font-size:12px;margin-bottom:10px}table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:12px}thead th{color:#334155;text-align:left}</style></head><body><h1>Tabla de medidas</h1><div class="sub">by @dr.juarez</div><div style="font-size:12px;color:#334155;margin-bottom:8px">${pNombre||"—"} · ${pEdad? pEdad+" años":"—"} · ${pSexo||"—"} · ${pFecha||"—"} · Dr: ${pDoctor||"—"}</div><table><thead><tr><th>Medida</th><th style="text-align:right">Valor</th><th>Unid</th><th>z</th><th>Interpretación</th></tr></thead><tbody>${htmlRows}</tbody></table><script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`; const blob = new Blob([html], {type:"text/html;charset=utf-8"}); const url = URL.createObjectURL(blob); const w = window.open(url, "_blank"); if(!w) setManualLink(url, "cefalo_tabla.pdf.html"); }
+
+  // ===== Resumen clínico =====
+  const sexLabel = pSexo==="M"?"masculino":(pSexo==="F"?"femenino":"");
+  const tolWord = (val:number, mean:number, units:string, hi:string, mid:string, lo:string) => { const i = interpWithTolerance(val, mean, units, true); if (i==="mayor") return hi; if (i==="menor") return lo; if (i==="normal") return mid; return "indeterminado"; };
+  const snaTxt = tolWord(SNA, DEFAULT_NORMS.steiner.SNA.mean, "°", "protruido", "normal", "retruido");
+  const snbTxt = tolWord(SNB, DEFAULT_NORMS.steiner.SNB.mean, "°", "protruida", "normal", "retruida");
+  const anbClass = (()=>{ const i = interpWithTolerance(ANB, DEFAULT_NORMS.steiner.ANB.mean, "°", true); if (i==="mayor") return "Clase II"; if (i==="menor") return "Clase III"; if (i==="normal") return "Clase I"; return "indeterminado"; })();
+  const growthTxt = tolWord(SN_GoGn, DEFAULT_NORMS.steiner.SN_GoGn.mean, "°", "hiperdivergente", "normodivergente", "hipodivergente");
+  const u1degTxt = tolWord(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, "°", "proinclinados", "normales", "retroinclinados");
+  const u1mmTxt  = mmPerPx ? tolWord(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, "mm", "protrusión", "normal", "retrusión") : "indeterminado";
+  const l1degTxt = tolWord(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, "°", "proinclinados", "normales", "retroinclinados");
+  const l1mmTxt  = mmPerPx ? tolWord(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, "mm", "protruidos", "normales", "retruídos") : "indeterminado";
+  const interTxt = tolWord(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, "°", "retroinclinación incisiva", "normal", "biprotrusión incisiva");
+  const lipsTxt  = mmPerPx ? tolWord(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, "mm", "protrusión labial", "normal", "retrusión labial") : "indeterminado";
+  const resumen = `Paciente ${sexLabel?`(${sexLabel}) `:""}de ${pEdad||"—"} años, presenta maxilar superior: ${snaTxt}, y la mandíbula: ${snbTxt}. Presenta una relación esqueletal de tipo: ${anbClass}. El paciente tiene un crecimiento craneofacial de tipo: ${growthTxt}. Dentalmente encontramos a los incisivos superiores con una angulación: ${u1degTxt}, y una posición: ${u1mmTxt}. Los incisivos inferiores con una angulación: ${l1degTxt}, y una posición: ${l1mmTxt}. La relación interincisal: ${interTxt} y los labios en posición: ${lipsTxt}.`;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -335,29 +408,31 @@ function CephTracer() {
           <h2 className="font-semibold mb-2">6) Resultados</h2>
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead><tr className="text-slate-300"><th className="text-left font-medium py-1 pr-4">Medida</th><th className="text-right font-medium py-1 pr-4">Valor</th><th className="text-left font-medium py-1">Unid</th><th className="text-left font-medium py-1">z</th></tr></thead>
+              <thead><tr className="text-slate-300"><th className="text-left font-medium py-1 pr-4">Medida</th><th className="text-right font-medium py-1 pr-4">Valor</th><th className="text-left font-medium py-1">Unid</th><th className="text-left font-medium py-1">z</th><th className="text-left font-medium py-1">Interpretación</th></tr></thead>
               <tbody className="text-slate-200">
                 {useSteiner && (<>
-                  <tr><td colSpan={4} className="pt-2 text-sky-300">— Steiner —</td></tr>
-                  <RowZ name="SNA" value={SNA} units="°" norm={DEFAULT_NORMS.steiner.SNA} />
-                  <RowZ name="SNB" value={SNB} units="°" norm={DEFAULT_NORMS.steiner.SNB} />
-                  <RowZ name="ANB" value={ANB} units="°" norm={DEFAULT_NORMS.steiner.ANB} />
-                  <RowZ name="SN–GoGn" value={SN_GoGn} units="°" norm={DEFAULT_NORMS.steiner.SN_GoGn} />
-                  <RowZ name="U1–NA (°)" value={U1_NA_deg} units="°" norm={DEFAULT_NORMS.steiner.U1_NA_deg} />
-                  <RowZ name="U1–NA (mm)" value={U1_NA_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.U1_NA_mm} />
-                  <RowZ name="L1–NB (°)" value={L1_NB_deg} units="°" norm={DEFAULT_NORMS.steiner.L1_NB_deg} />
-                  <RowZ name="L1–NB (mm)" value={L1_NB_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.L1_NB_mm} />
-                  <RowZ name="Interincisal" value={Interincisal} units="°" norm={DEFAULT_NORMS.steiner.Interincisal} />
-                  <RowZ name="Pg–NB (±)" value={Pg_NB_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.Pg_NB_mm} />
+                  <tr><td colSpan={5} className="pt-2 text-sky-300">— Steiner —</td></tr>
+                  <RowZInt name="SNA" value={SNA} units="°" norm={DEFAULT_NORMS.steiner.SNA} />
+                  <RowZInt name="SNB" value={SNB} units="°" norm={DEFAULT_NORMS.steiner.SNB} />
+                  <RowZInt name="ANB" value={ANB} units="°" norm={DEFAULT_NORMS.steiner.ANB} />
+                  <RowZInt name="SN–GoGn" value={SN_GoGn} units="°" norm={DEFAULT_NORMS.steiner.SN_GoGn} />
+                  <RowZInt name="U1–NA (°)" value={U1_NA_deg} units="°" norm={DEFAULT_NORMS.steiner.U1_NA_deg} />
+                  <RowZInt name="U1–NA (mm)" value={U1_NA_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.U1_NA_mm} zEnabled={Boolean(mmPerPx)} />
+                  <RowZInt name="L1–NB (°)" value={L1_NB_deg} units="°" norm={DEFAULT_NORMS.steiner.L1_NB_deg} />
+                  <RowZInt name="L1–NB (mm)" value={L1_NB_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.L1_NB_mm} zEnabled={Boolean(mmPerPx)} />
+                  <RowZInt name="Interincisal" value={Interincisal} units="°" norm={DEFAULT_NORMS.steiner.Interincisal} />
+                  <RowZInt name="Pg–NB (±)" value={Pg_NB_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.Pg_NB_mm} zEnabled={Boolean(mmPerPx)} />
                 </>)}
                 {useBjork && (<>
-                  <tr><td colSpan={4} className="pt-2 text-sky-300">— Björk–Jarabak —</td></tr>
-                  <RowZ name="Saddle (N–S–Ar)" value={Saddle_NSAr} units="°" norm={DEFAULT_NORMS.bjork.Saddle_NSAr} />
-                  <RowZ name="Articular (S–Ar–Go)" value={Articular_SArGo} units="°" norm={DEFAULT_NORMS.bjork.Articular_SArGo} />
-                  <RowZ name="Gonial (Ar–Go–Me)" value={Gonial_ArGoMe} units="°" norm={DEFAULT_NORMS.bjork.Gonial_ArGoMe} />
-                  <RowZ name="Suma Björk" value={Sum_Bjork} units="°" norm={DEFAULT_NORMS.bjork.Sum_Bjork} />
-                  <RowZ name="Jarabak % (S–Go/N–Me)" value={Jarabak_Ratio} units="%" norm={DEFAULT_NORMS.bjork.Jarabak_Ratio} />
+                  <tr><td colSpan={5} className="pt-2 text-sky-300">— Björk–Jarabak —</td></tr>
+                  <RowZInt name="Saddle (N–S–Ar)" value={Saddle_NSAr} units="°" norm={DEFAULT_NORMS.bjork.Saddle_NSAr} />
+                  <RowZInt name="Articular (S–Ar–Go)" value={Articular_SArGo} units="°" norm={DEFAULT_NORMS.bjork.Articular_SArGo} />
+                  <RowZInt name="Gonial (Ar–Go–Me)" value={Gonial_ArGoMe} units="°" norm={DEFAULT_NORMS.bjork.Gonial_ArGoMe} />
+                  <RowZInt name="Suma Björk" value={Sum_Bjork} units="°" norm={DEFAULT_NORMS.bjork.Sum_Bjork} />
+                  <RowZInt name="Jarabak % (S–Go/N–Me)" value={Jarabak_Ratio} units="%" norm={DEFAULT_NORMS.bjork.Jarabak_Ratio} />
                 </>)}
+                <tr><td colSpan={5} className="pt-2 text-sky-300">— Tejidos blandos —</td></tr>
+                <RowZInt name="Labio inf – E-line (±)" value={ELine_Li_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.soft.ELine_Li_mm} zEnabled={Boolean(mmPerPx)} />
               </tbody>
             </table>
           </div>
@@ -397,6 +472,8 @@ function CephTracer() {
                   {has("Go") && has("Gn") && (<line x1={points.Go!.x} y1={points.Go!.y} x2={points.Gn!.x} y2={points.Gn!.y} stroke="#94a3b8" strokeWidth={2} />)}
                   {has("U1T") && has("U1A") && (<line x1={points.U1T!.x} y1={points.U1T!.y} x2={points.U1A!.x} y2={points.U1A!.y} stroke="#eab308" strokeWidth={2} />)}
                   {has("L1T") && has("L1A") && (<line x1={points.L1T!.x} y1={points.L1T!.y} x2={points.L1A!.x} y2={points.L1A!.y} stroke="#22d3ee" strokeWidth={2} />)}
+                  {/* E-line */}
+                  {has("Prn") && has("PgS") && (<line x1={points.Prn!.x} y1={points.Prn!.y} x2={points.PgS!.x} y2={points.PgS!.y} stroke="#60a5fa" strokeDasharray="6 4" strokeWidth={2} />)}
                   {LANDMARKS.map(({ key, label }) => { const p = points[key]; if (!p) return null; const isActive = activeKey === key; return (
                     <g key={key} className="cursor-move pointer-events-auto" onMouseDown={(e)=>onPointMouseDown(key, e)}>
                       <circle cx={p.x} cy={p.y} r={6} fill={isActive?"#38bdf8":"#94a3b8"} stroke="#0f172a" strokeWidth={2} />
@@ -439,20 +516,29 @@ function CephTracer() {
             ) : (<div className="aspect-video w-full grid place-items-center text-slate-400"><p>Sube una radiografía para comenzar.</p></div>)}
           </div>
         </section>
+        <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
+          <h2 className="font-semibold mb-2">7) Resumen clínico</h2>
+          <p className="text-sm text-slate-200 leading-6">{resumen}</p>
+        </section>
       </div>
     </div>
   );
 }
 
-function RowZ({ name, value, units, norm }: { name: string; value: number; units: string; norm: { mean: number; sd: number } }) {
-  const ok = !Number.isNaN(value); const zz = ok ? zScore(value, norm.mean, norm.sd) : NaN;
-  const color = Number.isNaN(zz) ? "text-slate-500" : Math.abs(zz) < 1 ? "text-emerald-400" : Math.abs(zz) < 2 ? "text-amber-400" : "text-rose-400";
+function RowZInt({ name, value, units, norm, zEnabled=true }: { name: string; value: number; units: string; norm: { mean: number; sd: number }; zEnabled?: boolean }) {
+  const ok = !Number.isNaN(value);
+  const zz = ok && zEnabled ? zScore(value, norm.mean, norm.sd) : NaN;
+  const tol = toleranceForUnits(units);
+  const delta = ok ? value - norm.mean : NaN;
+  const tolColor = (!ok || tol==null || !zEnabled) ? "text-slate-500" : (Math.abs(delta!) <= tol ? "text-emerald-400" : Math.abs(delta!) <= (tol*2) ? "text-amber-400" : "text-rose-400");
+  const interp = interpWithTolerance(value, norm.mean, units, zEnabled);
   return (
     <tr className="border-t border-slate-800">
       <td className="py-1 pr-4 text-slate-300">{name}</td>
       <td className={`py-1 pr-4 text-right ${ok?"text-slate-100":"text-slate-500"}`}>{toFixedOrDash(value)}</td>
       <td className="py-1">{units}</td>
-      <td className={`py-1 ${color}`}>{Number.isNaN(zz) ? "—" : `${zz >= 0 ? "+" : ""}${zz.toFixed(2)}`}</td>
+      <td className={`py-1 ${tolColor}`}>{Number.isNaN(zz) ? "—" : `${zz >= 0 ? "+" : ""}${zz.toFixed(2)}`}</td>
+      <td className="py-1">{interp}</td>
     </tr>
   );
 }
