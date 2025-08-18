@@ -1,33 +1,24 @@
-# Cefalometría (React + Vite)
+# Cefalometría (React + Vite) – Fix Cloudflare
 
-Herramienta para trazos cefalométricos con calibración, exportación (PNG/PDF/CSV) y resumen clínico.
-Autor: **Fernando Juárez — @dr.juarez**.
+**Cambio clave**: en `package.json` usamos `"build": "vite build"` (antes tenía `tsc -b && vite build` y eso rompe en Cloudflare).
 
 ## Requisitos
-- Node.js 18+ y npm
+- Node.js 18+
+- PNPM/Yarn/NPM (Cloudflare usa npm por defecto).
 
-## Ejecutar en local
-```bash
-npm install
-npm run dev
-# abre http://localhost:5173
-```
+## Scripts
+- `npm run dev` – entorno local
+- `npm run build` – build de producción (genera `dist/`)
+- `npm run preview` – vista previa del build
+- `npm run typecheck` – chequeo de tipos sin emitir
 
-## Build de producción
+## Cloudflare Pages
+- **Build command**: `npm run build`
+- **Build output directory**: `dist`
+- **Node version**: 18 (Settings → Build & Deploy → Environment → `NODE_VERSION=18`)
+
+Si el build vuelve a fallar, revisa los logs y ejecuta localmente:
 ```bash
+npm ci
 npm run build
-npm run preview  # opcional para probar el build
 ```
-
-> Usamos Tailwind vía CDN en `index.html` (no hace falta pipeline de Tailwind).
-
-## Despliegue en Cloudflare Pages
-1. Conecta tu repo de GitHub.
-2. **Build command**: `npm run build`
-3. **Build output directory**: `dist`
-4. Node version: 18+ (por defecto está bien).
-5. Deploy.
-
-## Notas
-- Las imágenes y datos se procesan **localmente** en el navegador (no se suben al servidor).
-- Si el navegador bloquea popups/descargas, usa el enlace manual que aparece después de exportar.
