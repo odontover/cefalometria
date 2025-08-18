@@ -582,8 +582,17 @@ function CephTracer() {
         {/* 8) Donaciones */}
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
           <h2 className="font-semibold mb-2">8) Apoya el proyecto</h2>
-          <div className="rounded-xl overflow-hidden bg-slate-100">
-            <iframe
+         <div className="rounded-xl overflow-hidden bg-slate-100">
+           <script src='https://storage.ko-fi.com/cdn/scripts/overlay-widget.js'></script>
+<script>
+  kofiWidgetOverlay.draw('drjuarez', {
+    'type': 'floating-chat',
+    'floating-chat.donateButton.text': 'Donate',
+    'floating-chat.donateButton.background-color': '#00b9fe',
+    'floating-chat.donateButton.text-color': '#fff'
+  });
+</script>
+            <!--<iframe
               id="kofiframe"
               src="https://ko-fi.com/drjuarez/?hidefeed=true&widget=true&embed=true&preview=true"
               style={{ border: "none", width: "100%", padding: "4px", background: "#f9f9f9" }}
@@ -591,7 +600,7 @@ function CephTracer() {
               title="drjuarez"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
-            />
+            />-->
           </div>
         </section>
         {/* 9) Aviso */}
