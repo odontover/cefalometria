@@ -1,9 +1,10 @@
-# Cefalo Tracer (React + Vite + Tailwind)
+# Cefalometría (React + Vite)
 
-Herramienta para trazos cefalométricos con calibración y exportación (PNG/PDF/CSV). Incluye análisis Steiner y Björk–Jarabak, E-line, z-score y tolerancias (±2° / ±1 mm).
+Herramienta para trazos cefalométricos con calibración, exportación (PNG/PDF/CSV) y resumen clínico.
+Autor: **Fernando Juárez — @dr.juarez**.
 
 ## Requisitos
-- Node.js 18+
+- Node.js 18+ y npm
 
 ## Ejecutar en local
 ```bash
@@ -12,26 +13,21 @@ npm run dev
 # abre http://localhost:5173
 ```
 
-## Construir para producción
+## Build de producción
 ```bash
 npm run build
-npm run preview
+npm run preview  # opcional para probar el build
 ```
 
-La carpeta `dist/` es estática y lista para subir a cualquier hosting.
+> Usamos Tailwind vía CDN en `index.html` (no hace falta pipeline de Tailwind).
 
 ## Despliegue en Cloudflare Pages
-1. Crea un nuevo proyecto conectado a tu repo de GitHub.
-2. **Build command:** `npm run build`
-3. **Build output directory:** `dist`
-4. Guarda y despliega.
-
-## Uso rápido
-1. Sube una radiografía lateral.
-2. Calibra con dos clics sobre una regla conocida (mm).
-3. Coloca puntos siguiendo la lista de la izquierda (avanza automático al siguiente).
-4. Exporta: **Lámina (PNG)**, **PDF (A4)**, **CSV** o **Tabla (PNG/PDF)**.
+1. Conecta tu repo de GitHub.
+2. **Build command**: `npm run build`
+3. **Build output directory**: `dist`
+4. Node version: 18+ (por defecto está bien).
+5. Deploy.
 
 ## Notas
-- E-line: positivo = labio inferior por delante (protrusión); negativo = detrás (retrusión).
-- Los z-score e interpretaciones usan tolerancias: ±2° o ±1 mm (y ±2 u en %).
+- Las imágenes y datos se procesan **localmente** en el navegador (no se suben al servidor).
+- Si el navegador bloquea popups/descargas, usa el enlace manual que aparece después de exportar.

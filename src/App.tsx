@@ -73,6 +73,58 @@ const DEFAULT_NORMS = {
 };
 
 export default function App() {
+  // SEO meta y JSON-LD (una sola vez)
+  useEffect(() => {
+    const title = "Cefalometría | Trazos cefalométricos con calibración — Dr. Fernando Juárez (Ortodoncia en Veracruz)";
+    const desc = "Herramienta gratuita para trazos cefalométricos (Steiner, Björk–Jarabak, E-line), calibración con regla y exportación PNG/PDF/CSV. Autor: Fernando Juárez, Especialista en Ortodoncia en Veracruz.";
+
+    document.title = title;
+    const upsert = (attr: "name"|"property", key: string, content: string) => {
+      let m = document.querySelector(`meta[${attr}="${key}"]`) as HTMLMetaElement | null;
+      if (!m) { m = document.createElement("meta"); m.setAttribute(attr, key); document.head.appendChild(m); }
+      m.setAttribute("content", content);
+    };
+
+    // Meta básicas
+    upsert("name", "description", desc);
+    upsert("name", "author", "Fernando Juárez");
+    upsert("name", "robots", "index,follow");
+
+    // Open Graph / Twitter
+    upsert("property", "og:title", title);
+    upsert("property", "og:description", desc);
+    upsert("property", "og:type", "website");
+    upsert("property", "og:url", window.location.href);
+    upsert("name", "twitter:card", "summary_large_image");
+    upsert("name", "twitter:title", title);
+    upsert("name", "twitter:description", desc);
+
+    // JSON-LD (Person + WebApplication)
+    const ldId = "ld-json-cefalo";
+    let script = document.getElementById(ldId) as HTMLScriptElement | null;
+    if (!script) { script = document.createElement("script"); script.type = "application/ld+json"; script.id = ldId; document.head.appendChild(script); }
+    const ld = [
+      {
+        "@context": "https://schema.org",
+        "@type": "Person",
+        "name": "Fernando Juárez",
+        "jobTitle": "Especialista en Ortodoncia",
+        "url": "https://www.odontover.com/dentista-veracruz/dr-fernando-juárez-ortodoncia",
+        "sameAs": ["https://www.instagram.com/dr.juarez"]
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Cefalometría",
+        "applicationCategory": "MedicalApplication",
+        "operatingSystem": "Any",
+        "url": window.location.href,
+        "author": {"@type":"Person","name":"Fernando Juárez"}
+      }
+    ];
+    script.text = JSON.stringify(ld);
+  }, []);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-7xl p-4 md:p-8">
@@ -81,7 +133,13 @@ export default function App() {
           <a href="https://www.instagram.com/dr.juarez" target="_blank" rel="noopener" className="underline/50 hover:underline">by @dr.juarez</a>
         </p>
         <CephTracer />
-        <footer className="mt-8 text-xs text-slate-400">Realizado por Fernando Juárez – @dr.juarez</footer>
+        <footer className="mt-8 text-xs text-slate-400">
+          Realizado por Fernando Juárez{" "}
+          <a href="https://www.instagram.com/dr.juarez" target="_blank" rel="noopener" className="underline">@dr.juarez</a>{" "}
+          - Especialista en Ortodoncia, Ortodoncista en Veracruz ( {" "}
+          <a href="https://www.odontover.com/dentista-veracruz/dr-fernando-juárez-ortodoncia" target="_blank" rel="noopener" className="underline">odontover.com</a>
+          )
+        </footer>
       </div>
     </div>
   );
@@ -116,6 +174,7 @@ function CephTracer() {
   }, [imgSrc]);
   useEffect(() => () => { window.removeEventListener("mousemove", onMove as any); window.removeEventListener("mouseup", onUp as any); if (rafId.current) cancelAnimationFrame(rafId.current); if (downloadHint?.url?.startsWith("blob:")) URL.revokeObjectURL(downloadHint.url); }, [downloadHint]);
 
+  // "Tests" mínimos en runtime (no cambian comportamiento)
   useEffect(() => { try {
     console.assert(Math.abs(distance({x:0,y:0},{x:3,y:4})-5)<1e-6, "dist 3-4-5");
     const right90 = angleBetween({x:0,y:0},{x:1,y:0},{x:1,y:1}); console.assert(Math.abs(right90-90)<1e-6, "ang 90");
@@ -217,7 +276,7 @@ function CephTracer() {
     rows.push(["— Tejidos blandos —","","","",""],
       ["Labio inf – E-line (±)", toFixedOrDash(ELine_Li_mm), mmPerPx?"mm":"px", mmPerPx? toFixedOrDash(zScore(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd)) : "—", mmPerPx? interp(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, "mm", true) : "—"]
     );
-    const csv = rows.map(r=>r.join(",")).join("\r\n"); setLastCSV(csv); triggerDownload(new Blob([csv], {type:"text/csv;charset=utf-8"}), "cefalo_resultados.csv");
+    const csv = rows.map(r=>r.join(",")).join("\\r\\n"); setLastCSV(csv); triggerDownload(new Blob([csv], {type:"text/csv;charset=utf-8"}), "cefalo_resultados.csv");
   }
   function triggerDownload(blob: Blob, filename: string){ const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.rel="noopener"; try{ document.body.appendChild(a); a.click(); a.remove(); }catch{} setManualLink(url, filename); }
 
@@ -237,7 +296,7 @@ function CephTracer() {
     (LANDMARKS as any as {key:LandmarkKey}[]).forEach(({key}) => { const p = (points as any)[key] as Pt | undefined; if (p) (P as any)[key] = { x: p.x * sx, y: p.y * sy }; });
     const U1_axisE = P.U1T && P.U1A ? [P.U1T, P.U1A] as [Pt,Pt] : null; const L1_axisE = P.L1T && P.L1A ? [P.L1T, P.L1A] as [Pt,Pt] : null;
 
-    function drawLine(a?: Pt, b?: Pt, style = "#38bdf8", dash = false){ if (!a || !b) return; ctx.save(); if (dash) ctx.setLineDash([6,4]); ctx.strokeStyle = style; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad + a.x, pad + a.y); ctx.lineTo(pad + b.x, pad + b.y); ctx.stroke(); ctx.restore(); }
+    function drawLine(a?: Pt, b?: Pt, style = "#38bdf8", dash = False){ if (!a || !b) return; ctx.save(); if (dash) ctx.setLineDash([6,4]); ctx.strokeStyle = style; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad + a.x, pad + a.y); ctx.lineTo(pad + b.x, pad + b.y); ctx.stroke(); ctx.restore(); }
     function drawPoint(p?: Pt){ if (!p) return; ctx.save(); ctx.fillStyle = "#94a3b8"; ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(pad + p.x, pad + p.y, 5, 0, Math.PI*2); ctx.fill(); ctx.stroke(); ctx.restore(); }
     function drawArc(v?: Pt, p1?: Pt, p2?: Pt, color = "#22c55e"){ if (!v||!p1||!p2||!showOverlay) return; ctx.save(); const a1=Math.atan2(p1.y-v.y,p1.x-v.x), a2=Math.atan2(p2.y-v.y,p2.x-v.x); let da=a2-a1; while(da<=-Math.PI)da+=2*Math.PI; while(da>Math.PI)da-=2*Math.PI; ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.arc(pad+v.x,pad+v.y,35,a1,a2,da<0); ctx.stroke(); ctx.restore(); }
 
@@ -288,13 +347,13 @@ function CephTracer() {
   }
 
   function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number){
-    const words = text.split(/\s+/); const lines: string[] = []; let line = "";
+    const words = text.split(/\\s+/); const lines: string[] = []; let line = "";
     for (let i=0;i<words.length;i++){ const test = line ? line+" "+words[i] : words[i]; const w = ctx.measureText(test).width; if (w > maxWidth && line){ lines.push(line); line = words[i]; } else { line = test; } }
     if (line) lines.push(line); return lines;
   }
 
   async function exportSheetPNG(){ const c = await renderSheetCanvas(); if(!c) return; const blob: Blob | null = await new Promise(res=>c.toBlob(res,"image/png")); if(!blob){ const url = c.toDataURL("image/png"); setManualLink(url, "cefalometria.png"); try{ const a=document.createElement("a"); a.href=url; a.download="cefalometria.png"; a.rel="noopener"; a.target="_blank"; document.body.appendChild(a); a.click(); a.remove(); }catch{} return;} triggerDownload(blob, "cefalometria.png"); }
-  async function exportSheetPDF(){ const c = await renderSheetCanvas(); if(!c) return; const dataUrl = c.toDataURL("image/png"); const html = `<!doctype html><html><head><meta charset=\"utf-8\"/><title>Cefalometría – PDF</title><style>@page{size:A4;margin:16mm}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:#0b1220;margin:0}.hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}.brand{font-size:12px;color:#2563eb}.meta{font-size:12px;color:#334155;margin-bottom:12px}.img{width:100%;max-width:100%}a{color:#2563eb;text-decoration:underline}.resumen{margin-top:10px;font-size:12px;line-height:1.5;color:#111827}</style></head><body><div class=\"hdr\"><h1 style=\"margin:0;font-size:20px\">Cefalometría</h1><div class=\"brand\"><a href=\"https://www.instagram.com/dr.juarez\" target=\"_blank\" rel=\"noopener\">by @dr.juarez</a></div></div><div class=\"meta\"><div><strong>Paciente:</strong> ${pNombre || "—"}</div><div><strong>Edad:</strong> ${pEdad ? pEdad+" años" : "—"} &nbsp; <strong>Sexo:</strong> ${pSexo || "—"}</div><div><strong>Fecha:</strong> ${pFecha || "—"} &nbsp; <strong>Doctor:</strong> ${pDoctor || "—"}</div></div><img class=\"img\" src=\"${dataUrl}\" alt=\"Lámina cefalométrica\"/><div class=\"resumen\"><strong>Resumen clínico:</strong> ${resumen}</div><script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`; const blob = new Blob([html], {type:"text/html;charset=utf-8"}); const url = URL.createObjectURL(blob); const w = window.open(url, "_blank"); if(!w) setManualLink(url, "cefalometria.pdf.html"); }
+  async function exportSheetPDF(){ const c = await renderSheetCanvas(); if(!c) return; const dataUrl = c.toDataURL("image/png"); const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Cefalometría – PDF</title><style>@page{size:A4;margin:16mm}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:#0b1220;margin:0}.hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}.brand{font-size:12px;color:#2563eb}.meta{font-size:12px;color:#334155;margin-bottom:12px}.img{width:100%;max-width:100%}a{color:#2563eb;text-decoration:underline}.resumen{margin-top:10px;font-size:12px;line-height:1.5;color:#111827}</style></head><body><div class="hdr"><h1 style="margin:0;font-size:20px">Cefalometría</h1><div class="brand"><a href="https://www.instagram.com/dr.juarez" target="_blank" rel="noopener">by @dr.juarez</a></div></div><div class="meta"><div><strong>Paciente:</strong> ${pNombre || "—"}</div><div><strong>Edad:</strong> ${pEdad ? pEdad+" años" : "—"} &nbsp; <strong>Sexo:</strong> ${pSexo || "—"}</div><div><strong>Fecha:</strong> ${pFecha || "—"} &nbsp; <strong>Doctor:</strong> ${pDoctor || "—"}</div></div><img class="img" src="${dataUrl}" alt="Lámina cefalométrica"/><div class="resumen"><strong>Resumen clínico:</strong> ${resumen}</div><script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`; const blob = new Blob([html], {type:"text/html;charset=utf-8"}); const url = URL.createObjectURL(blob); const w = window.open(url, "_blank"); if(!w) setManualLink(url, "cefalometria.pdf.html"); }
 
   // Exportar SOLO tabla de medidas (extra)
   function buildMeasuresRows(){
@@ -519,6 +578,28 @@ function CephTracer() {
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
           <h2 className="font-semibold mb-2">7) Resumen clínico</h2>
           <p className="text-sm text-slate-200 leading-6">{resumen}</p>
+        </section>
+        {/* 8) Donaciones */}
+        <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
+          <h2 className="font-semibold mb-2">8) Apoya el proyecto</h2>
+          <div className="rounded-xl overflow-hidden bg-slate-100">
+            <iframe
+              id="kofiframe"
+              src="https://ko-fi.com/drjuarez/?hidefeed=true&widget=true&embed=true&preview=true"
+              style={{ border: "none", width: "100%", padding: "4px", background: "#f9f9f9" }}
+              height={712}
+              title="drjuarez"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        </section>
+        {/* 9) Aviso */}
+        <section className="rounded-2xl border border-amber-700/40 p-4 bg-amber-900/20 mt-3">
+          <h2 className="font-semibold mb-2">Aviso y responsabilidad</h2>
+          <p className="text-xs leading-5 text-amber-100/90">
+            Esta herramienta es de apoyo académico/clínico. El usuario es responsable de verificar medidas y resultados antes de cualquier decisión terapéutica. Ni el sitio ni el autor asumen responsabilidad por interpretaciones o usos indebidos. Las imágenes y datos que cargas se procesan localmente en tu navegador y <strong>no se almacenan en ningún servidor</strong>.
+          </p>
         </section>
       </div>
     </div>
