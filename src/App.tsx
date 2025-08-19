@@ -608,7 +608,7 @@ function CephTracer() {
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
           <h2 className="font-semibold mb-2">8) Apoya el proyecto</h2>
           <p className="text-sm text-slate-300">
-            El botón flotante <em>Donate</em> aparece abajo a la derecha. Si no lo ves,
+            Da click en el botón flotante <em>Donate!</em> de abajo, o
             <button
               onClick={() => (window as any).kofiWidgetOverlay?.draw?.('drjuarez', {
                 'type': 'floating-chat',
