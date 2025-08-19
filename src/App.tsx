@@ -125,6 +125,31 @@ export default function App() {
     script.text = JSON.stringify(ld);
   }, []);
 
+  // Ko-fi floating overlay (donation button)
+  useEffect(() => {
+    const id = 'ko-fi-overlay-script';
+    const draw = () => {
+      try {
+        (window as any).kofiWidgetOverlay?.draw?.('drjuarez', {
+          'type': 'floating-chat',
+          'floating-chat.donateButton.text': 'Donate',
+          'floating-chat.donateButton.background-color': '#00b9fe',
+          'floating-chat.donateButton.text-color': '#fff'
+        });
+      } catch {}
+    };
+    if (!document.getElementById(id)) {
+      const s = document.createElement('script');
+      s.src = 'https://storage.ko-fi.com/cdn/scripts/overlay-widget.js';
+      s.async = true;
+      s.id = id;
+      s.onload = draw;
+      document.head.appendChild(s);
+    } else {
+      draw();
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-7xl p-4 md:p-8">
@@ -276,7 +301,7 @@ function CephTracer() {
     rows.push(["— Tejidos blandos —","","","",""],
       ["Labio inf – E-line (±)", toFixedOrDash(ELine_Li_mm), mmPerPx?"mm":"px", mmPerPx? toFixedOrDash(zScore(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd)) : "—", mmPerPx? interp(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, "mm", true) : "—"]
     );
-    const csv = rows.map(r=>r.join(",")).join("\\r\\n"); setLastCSV(csv); triggerDownload(new Blob([csv], {type:"text/csv;charset=utf-8"}), "cefalo_resultados.csv");
+    const csv = rows.map(r=>r.join(",")).join("\r\n"); setLastCSV(csv); triggerDownload(new Blob([csv], {type:"text/csv;charset=utf-8"}), "cefalo_resultados.csv");
   }
   function triggerDownload(blob: Blob, filename: string){ const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.rel="noopener"; try{ document.body.appendChild(a); a.click(); a.remove(); }catch{} setManualLink(url, filename); }
 
@@ -296,7 +321,7 @@ function CephTracer() {
     (LANDMARKS as any as {key:LandmarkKey}[]).forEach(({key}) => { const p = (points as any)[key] as Pt | undefined; if (p) (P as any)[key] = { x: p.x * sx, y: p.y * sy }; });
     const U1_axisE = P.U1T && P.U1A ? [P.U1T, P.U1A] as [Pt,Pt] : null; const L1_axisE = P.L1T && P.L1A ? [P.L1T, P.L1A] as [Pt,Pt] : null;
 
-    function drawLine(a?: Pt, b?: Pt, style = "#38bdf8", dash = False){ if (!a || !b) return; ctx.save(); if (dash) ctx.setLineDash([6,4]); ctx.strokeStyle = style; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad + a.x, pad + a.y); ctx.lineTo(pad + b.x, pad + b.y); ctx.stroke(); ctx.restore(); }
+    function drawLine(a?: Pt, b?: Pt, style = "#38bdf8", dash = false){ if (!a || !b) return; ctx.save(); if (dash) ctx.setLineDash([6,4]); ctx.strokeStyle = style; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad + a.x, pad + a.y); ctx.lineTo(pad + b.x, pad + b.y); ctx.stroke(); ctx.restore(); }
     function drawPoint(p?: Pt){ if (!p) return; ctx.save(); ctx.fillStyle = "#94a3b8"; ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(pad + p.x, pad + p.y, 5, 0, Math.PI*2); ctx.fill(); ctx.stroke(); ctx.restore(); }
     function drawArc(v?: Pt, p1?: Pt, p2?: Pt, color = "#22c55e"){ if (!v||!p1||!p2||!showOverlay) return; ctx.save(); const a1=Math.atan2(p1.y-v.y,p1.x-v.x), a2=Math.atan2(p2.y-v.y,p2.x-v.x); let da=a2-a1; while(da<=-Math.PI)da+=2*Math.PI; while(da>Math.PI)da-=2*Math.PI; ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.arc(pad+v.x,pad+v.y,35,a1,a2,da<0); ctx.stroke(); ctx.restore(); }
 
@@ -332,7 +357,7 @@ function CephTracer() {
       lineKV("Saddle (°)", toFixedOrDash(Saddle_NSAr), zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd));
       lineKV("Articular (°)", toFixedOrDash(Articular_SArGo), zScore(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd));
       lineKV("Gonial (°)", toFixedOrDash(Gonial_ArGoMe), zScore(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd));
-      lineKV("Suma (°)", toFixedOrDash(Sum_Bjork), zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd));
+      lineKV("Suma (°)", toFixedOrDash(Sum_Bjork), zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORNS.bjork.Sum_Bjork.sd));
       lineKV("Jarabak (%)", toFixedOrDash(Jarabak_Ratio), zScore(Jarabak_Ratio, DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd));
     }
     // Tejidos blandos
@@ -347,7 +372,7 @@ function CephTracer() {
   }
 
   function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number){
-    const words = text.split(/\\s+/); const lines: string[] = []; let line = "";
+    const words = text.split(/\s+/); const lines: string[] = []; let line = "";
     for (let i=0;i<words.length;i++){ const test = line ? line+" "+words[i] : words[i]; const w = ctx.measureText(test).width; if (w > maxWidth && line){ lines.push(line); line = words[i]; } else { line = test; } }
     if (line) lines.push(line); return lines;
   }
@@ -582,17 +607,18 @@ function CephTracer() {
         {/* 8) Donaciones */}
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
           <h2 className="font-semibold mb-2">8) Apoya el proyecto</h2>
-         <div className="rounded-xl overflow-hidden bg-slate-100">
-            <iframe
-              id="kofiframe"
-              src="https://ko-fi.com/drjuarez/?hidefeed=true&widget=true&embed=true&preview=true"
-              style={{ border: "none", width: "100%", padding: "4px", background: "#f9f9f9" }}
-              height={712}
-              title="drjuarez"
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
-          </div>
+          <p className="text-sm text-slate-300">
+            El botón flotante <em>Donate</em> aparece abajo a la derecha. Si no lo ves,
+            <button
+              onClick={() => (window as any).kofiWidgetOverlay?.draw?.('drjuarez', {
+                'type': 'floating-chat',
+                'floating-chat.donateButton.text': 'Donate',
+                'floating-chat.donateButton.background-color': '#00b9fe',
+                'floating-chat.donateButton.text-color': '#fff'
+              })}
+              className="underline text-sky-300 ml-1"
+            >haz clic aquí para recargarlo</button>.
+          </p>
         </section>
         {/* 9) Aviso */}
         <section className="rounded-2xl border border-amber-700/40 p-4 bg-amber-900/20 mt-3">
