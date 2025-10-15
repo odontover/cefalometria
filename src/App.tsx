@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
+import { jsPDF } from "jspdf"; // ← NUEVA importación para PDF real
 
 // Helpers mínimos
 function distance(a: Pt, b: Pt) { return Math.hypot(a.x - b.x, a.y - b.y); }
@@ -27,11 +28,11 @@ function arcPath(v: Pt, p1: Pt, p2: Pt, r = 35) {
 }
 function todayISO() { const d = new Date(); const m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0"); return `${d.getFullYear()}-${m}-${day}`; }
 
-// === Tolerancias clínicas (±2° y ±1mm; % usa ±2 unidades) ===
+// === Tolerancias clínicas ===
 function toleranceForUnits(units: string): number | null {
   if (units.includes("°")) return 2;
   if (units.includes("mm")) return 1;
-  if (units.includes("%")) return 2; // criterio práctico
+  if (units.includes("%")) return 2;
   return null;
 }
 function interpWithTolerance(val: number, mean: number, units: string, enabled = true) {
@@ -42,10 +43,9 @@ function interpWithTolerance(val: number, mean: number, units: string, enabled =
 
 // Types
 type Pt = { x: number; y: number };
+type LandmarkKey = "S"|"N"|"A"|"B"|"Po"|"Or"|"Go"|"Me"|"Pg"|"Gn"|"Ar"|"U1T"|"U1A"|"L1T"|"L1A"|"Prn"|"PgS"|"Li";
 
-type LandmarkKey = "S"|"N"|"A"|"B"|"Po"|"Or"|"Go"|"Me"|"Pg"|"Gn"|"Ar"|"U1T"|"U1A"|"L1T"|"L1A"|"Prn"|"PgS"|"Li"; // + tejidos blandos
-
-const LANDMARKS: { key: LandmarkKey; label: string; desc: string }[] = [
+const LANDMARKS = [
   { key: "S", label: "S – Sella", desc: "Centro de la silla turca" },
   { key: "N", label: "N – Nasion", desc: "Sutura frontonasal" },
   { key: "A", label: "A – Punto A", desc: "Subespinal maxilar" },
@@ -61,15 +61,15 @@ const LANDMARKS: { key: LandmarkKey; label: string; desc: string }[] = [
   { key: "U1A", label: "U1A – Incisivo sup. ápice", desc: "Ápice radicular incisivo superior" },
   { key: "L1T", label: "L1T – Incisivo inf. borde", desc: "Borde incisal incisivo inferior" },
   { key: "L1A", label: "L1A – Incisivo inf. ápice", desc: "Ápice radicular incisivo inferior" },
-  { key: "Prn", label: "Prn – Pronasale (punta de la nariz)", desc: "Punto más anterior del dorso nasal blando" },
+  { key: "Prn", label: "Prn – Pronasale", desc: "Punto más anterior del dorso nasal" },
   { key: "PgS", label: "Pg' – Pogonion blando", desc: "Pogonion de tejidos blandos" },
   { key: "Li", label: "Li – Labrale inferius", desc: "Punto más anterior del labio inferior" },
-];
+] as const;
 
 const DEFAULT_NORMS = {
   steiner: { SNA:{mean:82,sd:3}, SNB:{mean:80,sd:3}, ANB:{mean:2,sd:2}, SN_GoGn:{mean:32,sd:5}, U1_NA_deg:{mean:22,sd:6}, U1_NA_mm:{mean:4,sd:2}, L1_NB_deg:{mean:25,sd:6}, L1_NB_mm:{mean:4,sd:2}, Interincisal:{mean:131,sd:6}, Pg_NB_mm:{mean:0,sd:2} },
   bjork:   { Saddle_NSAr:{mean:123,sd:5}, Articular_SArGo:{mean:143,sd:6}, Gonial_ArGoMe:{mean:130,sd:7}, Sum_Bjork:{mean:396,sd:6}, Jarabak_Ratio:{mean:65,sd:3} },
-  soft:    { ELine_Li_mm:{mean:-2,sd:2} } // Ricketts: labio inf. ~ -2±2 mm (adulto)
+  soft:    { ELine_Li_mm:{mean:-2,sd:2} }
 };
 
 export default function App() {
@@ -357,7 +357,7 @@ function CephTracer() {
       lineKV("Saddle (°)", toFixedOrDash(Saddle_NSAr), zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd));
       lineKV("Articular (°)", toFixedOrDash(Articular_SArGo), zScore(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd));
       lineKV("Gonial (°)", toFixedOrDash(Gonial_ArGoMe), zScore(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd));
-      lineKV("Suma (°)", toFixedOrDash(Sum_Bjork), zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORNS.bjork.Sum_Bjork.sd));
+      lineKV("Suma (°)", toFixedOrDash(Sum_Bjork), zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd));
       lineKV("Jarabak (%)", toFixedOrDash(Jarabak_Ratio), zScore(Jarabak_Ratio, DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd));
     }
     // Tejidos blandos
@@ -378,7 +378,51 @@ function CephTracer() {
   }
 
   async function exportSheetPNG(){ const c = await renderSheetCanvas(); if(!c) return; const blob: Blob | null = await new Promise(res=>c.toBlob(res,"image/png")); if(!blob){ const url = c.toDataURL("image/png"); setManualLink(url, "cefalometria.png"); try{ const a=document.createElement("a"); a.href=url; a.download="cefalometria.png"; a.rel="noopener"; a.target="_blank"; document.body.appendChild(a); a.click(); a.remove(); }catch{} return;} triggerDownload(blob, "cefalometria.png"); }
-  async function exportSheetPDF(){ const c = await renderSheetCanvas(); if(!c) return; const dataUrl = c.toDataURL("image/png"); const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Cefalometría – PDF</title><style>@page{size:A4;margin:16mm}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:#0b1220;margin:0}.hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px}.brand{font-size:12px;color:#2563eb}.meta{font-size:12px;color:#334155;margin-bottom:12px}.img{width:100%;max-width:100%}a{color:#2563eb;text-decoration:underline}.resumen{margin-top:10px;font-size:12px;line-height:1.5;color:#111827}</style></head><body><div class="hdr"><h1 style="margin:0;font-size:20px">Cefalometría</h1><div class="brand"><a href="https://www.instagram.com/dr.juarez" target="_blank" rel="noopener">by @dr.juarez</a></div></div><div class="meta"><div><strong>Paciente:</strong> ${pNombre || "—"}</div><div><strong>Edad:</strong> ${pEdad ? pEdad+" años" : "—"} &nbsp; <strong>Sexo:</strong> ${pSexo || "—"}</div><div><strong>Fecha:</strong> ${pFecha || "—"} &nbsp; <strong>Doctor:</strong> ${pDoctor || "—"}</div></div><img class="img" src="${dataUrl}" alt="Lámina cefalométrica"/><div class="resumen"><strong>Resumen clínico:</strong> ${resumen}</div><script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`; const blob = new Blob([html], {type:"text/html;charset=utf-8"}); const url = URL.createObjectURL(blob); const w = window.open(url, "_blank"); if(!w) setManualLink(url, "cefalometria.pdf.html"); }
+  
+  // 💾 Reemplaza tu función exportSheetPDF por esta:
+async function exportSheetPDF() {
+  const c = await renderSheetCanvas();
+  if (!c) return;
+
+  // Convierte canvas a imagen
+  const dataUrl = c.toDataURL("image/png");
+
+  // Crea PDF (A4 con orientación automática)
+  const pdf = new jsPDF({
+    orientation: c.width > c.height ? "landscape" : "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const imgAspect = c.width / c.height;
+  let renderWidth = pageWidth;
+  let renderHeight = pageWidth / imgAspect;
+
+  if (renderHeight > pageHeight) {
+    renderHeight = pageHeight;
+    renderWidth = pageHeight * imgAspect;
+  }
+
+  const x = (pageWidth - renderWidth) / 2;
+  const y = (pageHeight - renderHeight) / 2;
+
+  pdf.addImage(dataUrl, "PNG", x, y, renderWidth, renderHeight);
+
+  // Pie de página con autor y fecha
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.setTextColor(120);
+  pdf.text(
+    `Cefalometría — Dr. Fernando Juárez · ${new Date().toLocaleDateString("es-MX")}`,
+    pageWidth / 2,
+    pageHeight - 5,
+    { align: "center" }
+  );
+
+  pdf.save("cefalometria.pdf");
+}
 
   // Exportar SOLO tabla de medidas (extra)
   function buildMeasuresRows(){
