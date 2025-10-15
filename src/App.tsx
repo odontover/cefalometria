@@ -291,7 +291,7 @@ function CephTracer() {
       ["Pg–NB (±)", toFixedOrDash(Pg_NB_mm), mmPerPx?"mm":"px", mmPerPx? toFixedOrDash(zScore(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd)) : "—", mmPerPx? interp(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, "mm", true) : "—"]
     );
     if (useBjork) rows.push(["— Björk–Jarabak —","","","",""],
-      ["Saddle (N–S–Ar)", toFixedOrDash(Saddle_NSAr), "°", toFixedOrDash(zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd)), interp(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, "°")],
+      ["Silla (N–S–Ar)", toFixedOrDash(Saddle_NSAr), "°", toFixedOrDash(zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd)), interp(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, "°")],
       ["Articular (S–Ar–Go)", toFixedOrDash(Articular_SArGo), "°", toFixedOrDash(zScore(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd)), interp(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, "°")],
       ["Gonial (Ar–Go–Me)", toFixedOrDash(Gonial_ArGoMe), "°", toFixedOrDash(zScore(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd)), interp(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, "°")],
       ["Suma Björk", toFixedOrDash(Sum_Bjork), "°", toFixedOrDash(zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd)), interp(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, "°")],
@@ -305,71 +305,262 @@ function CephTracer() {
   }
   function triggerDownload(blob: Blob, filename: string){ const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.rel="noopener"; try{ document.body.appendChild(a); a.click(); a.remove(); }catch{} setManualLink(url, filename); }
 
-  // === Render export con coordenadas a tamaño NATURAL ===
-  async function renderSheetCanvas(): Promise<HTMLCanvasElement | null> {
-    if (!imgRef.current) { alert("Primero sube una radiografía."); return null; }
-    const imgEl = imgRef.current; if (!imgEl.complete) { try { await (imgEl as any).decode?.(); } catch {} }
-    const natW = imgEl.naturalWidth, natH = imgEl.naturalHeight; const renW = imgEl.width || imgEl.getBoundingClientRect().width; const renH = imgEl.height || imgEl.getBoundingClientRect().height;
-    if (!natW || !natH || !renW || !renH) { alert("La imagen aún no está lista para exportar."); return null; }
-    const sx = natW / renW, sy = natH / renH; // factor de escala render->natural
 
-    const sidebarW = 440, pad = 24; const W = natW + sidebarW + pad * 2, H = natH + pad * 2;
-    const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H; const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#0b1220"; ctx.fillRect(0, 0, W, H); ctx.drawImage(imgEl, pad, pad, natW, natH);
-
-    const P: Partial<Record<LandmarkKey, Pt>> = {};
-    (LANDMARKS as any as {key:LandmarkKey}[]).forEach(({key}) => { const p = (points as any)[key] as Pt | undefined; if (p) (P as any)[key] = { x: p.x * sx, y: p.y * sy }; });
-    const U1_axisE = P.U1T && P.U1A ? [P.U1T, P.U1A] as [Pt,Pt] : null; const L1_axisE = P.L1T && P.L1A ? [P.L1T, P.L1A] as [Pt,Pt] : null;
-
-    function drawLine(a?: Pt, b?: Pt, style = "#38bdf8", dash = false){ if (!a || !b) return; ctx.save(); if (dash) ctx.setLineDash([6,4]); ctx.strokeStyle = style; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad + a.x, pad + a.y); ctx.lineTo(pad + b.x, pad + b.y); ctx.stroke(); ctx.restore(); }
-    function drawPoint(p?: Pt){ if (!p) return; ctx.save(); ctx.fillStyle = "#94a3b8"; ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(pad + p.x, pad + p.y, 5, 0, Math.PI*2); ctx.fill(); ctx.stroke(); ctx.restore(); }
-    function drawArc(v?: Pt, p1?: Pt, p2?: Pt, color = "#22c55e"){ if (!v||!p1||!p2||!showOverlay) return; ctx.save(); const a1=Math.atan2(p1.y-v.y,p1.x-v.x), a2=Math.atan2(p2.y-v.y,p2.x-v.x); let da=a2-a1; while(da<=-Math.PI)da+=2*Math.PI; while(da>Math.PI)da-=2*Math.PI; ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.arc(pad+v.x,pad+v.y,35,a1,a2,da<0); ctx.stroke(); ctx.restore(); }
-
-    drawLine(P.S, P.N, "#38bdf8"); drawLine(P.N, P.A, "#22c55e"); drawLine(P.N, P.B, "#f97316"); drawLine(P.Po, P.Or, "#a78bfa", true); drawLine(P.Go, P.Me, "#f472b6", true); drawLine(P.Go, P.Gn, "#94a3b8");
-    if (U1_axisE) drawLine(U1_axisE[0], U1_axisE[1], "#eab308"); if (L1_axisE) drawLine(L1_axisE[0], L1_axisE[1], "#22d3ee");
-    // E-line tejidos blandos
-    drawLine(P.Prn, P.PgS, "#60a5fa", true);
-    Object.values(P).forEach(p=>drawPoint(p));
-    drawArc(P.N, P.S, P.A, "#22c55e"); drawArc(P.N, P.S, P.B, "#f97316"); drawArc(P.N, P.A, P.B, "#38bdf8"); drawArc(P.S, P.N, P.Ar, "#16a34a"); drawArc(P.Ar, P.S, P.Go, "#d946ef"); drawArc(P.Go, P.Ar, P.Me, "#fb7185");
-
-    const x0 = pad + natW + 16; let y = pad + 8; ctx.fillStyle="#e2e8f0"; ctx.font = "bold 20px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
-    ctx.fillText("Cefalometría", x0, y); y += 22; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillStyle="#93c5fd"; ctx.fillText("by @dr.juarez", x0, y); y += 6;
-    const mmPerPxNat = mmPerPx ? (mmPerPx / ((sx+sy)/2)) : null; const scaleLabelExport = mmPerPxNat ? `Escala: ${(1/mmPerPxNat).toFixed(2)} px/mm · ${mmPerPxNat.toFixed(4)} mm/px` : "Sin calibrar";
-    ctx.fillStyle="#94a3b8"; ctx.fillText(scaleLabelExport, x0, y + 18); y += 36;
-    function lineKV(k: string, v: string, z?: number){ ctx.fillStyle="#e2e8f0"; ctx.fillText(k, x0, y); const vStr = v + (z==null||Number.isNaN(z)?"":`  (z ${z>=0?"+":""}${z.toFixed(2)})`); ctx.textAlign="right"; ctx.fillText(vStr, x0 + sidebarW - 24, y); ctx.textAlign="left"; y += 16; }
-
-    ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Datos del paciente", x0, y); y += 18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
-    lineKV("Nombre", pNombre||"—"); lineKV("Edad", pEdad?`${pEdad} años`:"—"); lineKV("Sexo", pSexo||"—"); lineKV("Fecha", pFecha||"—"); lineKV("Doctor", pDoctor||"—"); y += 6;
-
-    if (useSteiner){ ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Steiner", x0, y); y+=18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
-      lineKV("SNA (°)", toFixedOrDash(SNA), zScore(SNA, DEFAULT_NORMS.steiner.SNA.mean, DEFAULT_NORMS.steiner.SNA.sd));
-      lineKV("SNB (°)", toFixedOrDash(SNB), zScore(SNB, DEFAULT_NORMS.steiner.SNB.mean, DEFAULT_NORMS.steiner.SNB.sd));
-      lineKV("ANB (°)", toFixedOrDash(ANB), zScore(ANB, DEFAULT_NORMS.steiner.ANB.mean, DEFAULT_NORMS.steiner.ANB.sd));
-      lineKV("SN–GoGn (°)", toFixedOrDash(SN_GoGn), zScore(SN_GoGn, DEFAULT_NORMS.steiner.SN_GoGn.mean, DEFAULT_NORMS.steiner.SN_GoGn.sd));
-      lineKV("U1–NA (°)", toFixedOrDash(U1_NA_deg), zScore(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, DEFAULT_NORMS.steiner.U1_NA_deg.sd));
-      lineKV("U1–NA (mm)", toFixedOrDash(U1_NA_mm), mmPerPx? zScore(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd):NaN);
-      lineKV("L1–NB (°)", toFixedOrDash(L1_NB_deg), zScore(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, DEFAULT_NORMS.steiner.L1_NB_deg.sd));
-      lineKV("L1–NB (mm)", toFixedOrDash(L1_NB_mm), mmPerPx? zScore(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd):NaN);
-      lineKV("Interincisal (°)", toFixedOrDash(Interincisal), zScore(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, DEFAULT_NORMS.steiner.Interincisal.sd));
-      lineKV("Pg–NB (mm)", toFixedOrDash(Pg_NB_mm), mmPerPx? zScore(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd):NaN); y+=6;
-    }
-    if (useBjork){ ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Björk–Jarabak", x0, y); y+=18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
-      lineKV("Saddle (°)", toFixedOrDash(Saddle_NSAr), zScore(Saddle_NSAr, DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd));
-      lineKV("Articular (°)", toFixedOrDash(Articular_SArGo), zScore(Articular_SArGo, DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd));
-      lineKV("Gonial (°)", toFixedOrDash(Gonial_ArGoMe), zScore(Gonial_ArGoMe, DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd));
-      lineKV("Suma (°)", toFixedOrDash(Sum_Bjork), zScore(Sum_Bjork, DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd));
-      lineKV("Jarabak (%)", toFixedOrDash(Jarabak_Ratio), zScore(Jarabak_Ratio, DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd));
-    }
-    // Tejidos blandos
-    ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Tejidos blandos", x0, y); y+=18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif";
-    lineKV("Labio inf – E-line (mm)", toFixedOrDash(ELine_Li_mm), mmPerPx? zScore(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd):NaN);
-
-    // Resumen clínico en lámina
-    y += 18; ctx.fillStyle="#93c5fd"; ctx.font = "bold 14px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillText("Resumen clínico", x0, y); y += 18; ctx.font = "12px system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif"; ctx.fillStyle="#e2e8f0";
-    const wrapW = sidebarW - 32; const lh = 16; const lines = wrapText(ctx, resumen, wrapW); lines.forEach((ln)=>{ ctx.fillText(ln, x0, y); y += lh; });
-
-    return canvas;
+// === Render export (Odontover Pro v2.1 — refinado, con dominio cefalometria.odontover.com) ===
+async function renderSheetCanvas(): Promise<HTMLCanvasElement | null> {
+  if (!imgRef.current) {
+    alert("Primero sube una radiografía.");
+    return null;
   }
+
+  const imgEl = imgRef.current;
+  if (!imgEl.complete) { try { await (imgEl as any).decode?.(); } catch {} }
+
+  const natW = imgEl.naturalWidth;
+  const natH = imgEl.naturalHeight;
+  const renW = imgEl.width || imgEl.getBoundingClientRect().width;
+  const renH = imgEl.height || imgEl.getBoundingClientRect().height;
+  if (!natW || !natH || !renW || !renH) {
+    alert("La imagen aún no está lista para exportar.");
+    return null;
+  }
+
+  const sx = natW / renW;
+  const sy = natH / renH;
+  const imgScale = 0.8;
+  const scaledW = natW * imgScale;
+  const scaledH = natH * imgScale;
+  const sidebarW = 620;
+  const pad = 24;
+  const W = scaledW + sidebarW + pad * 2;
+  const H = scaledH + pad * 3 + 70;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+  const scaleFactor = Math.min(Math.max(natW / 1200, 1.2), 3);
+
+
+  // === Encabezado ===
+  const headerH = 54 * scaleFactor;
+  ctx.fillStyle = "#1e293b";
+  ctx.fillRect(0, 0, W, headerH);
+
+  // === Logo ===
+  const logo = new Image();
+  const logoPromise = new Promise<boolean>((resolve) => {
+    logo.onload = () => resolve(true);
+    logo.onerror = () => resolve(false);
+  });
+  logo.src = "/logo-odontover.png";
+  const logoOK = await logoPromise;
+  if (logoOK) {
+    const logoH = headerH * 0.7;
+    const logoW = logo.width * (logoH / logo.height);
+    ctx.drawImage(logo, pad, (headerH - logoH) / 2, logoW, logoH);
+  }
+
+  // === Título ===
+  ctx.fillStyle = "#e2e8f0";
+  ctx.font = `bold ${22 * scaleFactor}px system-ui`;
+  const titleX = logoOK ? pad + 60 * scaleFactor : pad;
+  ctx.fillText("Cefalometría", titleX, headerH / 2 + 6 * scaleFactor);
+  ctx.font = `${14 * scaleFactor}px system-ui`;
+  ctx.fillStyle = "#93c5fd";
+  ctx.fillText("by Odontover.com", titleX + 140 * scaleFactor, headerH / 2 + 4 * scaleFactor);
+  ctx.font = `${13 * scaleFactor}px system-ui`;
+  ctx.fillStyle = "#cbd5e1";
+  ctx.textAlign = "right";
+  ctx.fillText(`${pFecha || todayISO()}`, W - pad, headerH / 2 + 4 * scaleFactor);
+  ctx.textAlign = "left";
+
+  // === Radiografía ===
+  const offsetY = headerH + pad;
+  ctx.drawImage(imgEl, pad, offsetY, scaledW, scaledH);
+
+  // === Puntos y líneas ===
+  const P: Partial<Record<LandmarkKey, Pt>> = {};
+  (LANDMARKS as any as { key: LandmarkKey }[]).forEach(({ key }) => {
+    const p = (points as any)[key] as Pt | undefined;
+    if (p) (P as any)[key] = { x: p.x * sx * imgScale, y: p.y * sy * imgScale };
+  });
+
+  const U1_axisE = P.U1T && P.U1A ? [P.U1T, P.U1A] as [Pt, Pt] : null;
+  const L1_axisE = P.L1T && P.L1A ? [P.L1T, P.L1A] as [Pt, Pt] : null;
+
+  const lineColor = {
+    cranial: "#38bdf8",
+    skeletal: "#60a5fa",
+    dental: "#fcd34d",
+    soft: "#7dd3fc",
+  };
+
+  const drawLine = (a?: Pt, b?: Pt, color = "#38bdf8", dash = false) => {
+    if (!a || !b) return;
+    ctx.save();
+    if (dash) ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pad + a.x, offsetY + a.y);
+    ctx.lineTo(pad + b.x, offsetY + b.y);
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  const drawArc = (v: Pt, p1: Pt, p2: Pt, color = "#93c5fd", radius = 60 * scaleFactor, label?: string) => {
+    const a1 = Math.atan2(p1.y - v.y, p1.x - v.x);
+    const a2 = Math.atan2(p2.y - v.y, p2.x - v.x);
+    let da = a2 - a1;
+    while (da <= -Math.PI) da += 2 * Math.PI;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(pad + v.x, offsetY + v.y, radius, a1, a2, da < 0);
+    ctx.stroke();
+    ctx.restore();
+    if (label) {
+      ctx.save();
+      ctx.font = `${12 * scaleFactor}px system-ui`;
+      ctx.fillStyle = "#e2e8f0";
+      ctx.fillText(label, pad + v.x + radius + 8, offsetY + v.y);
+      ctx.restore();
+    }
+  };
+
+  const drawPoint = (p?: Pt) => {
+    if (!p) return;
+    ctx.save();
+    ctx.fillStyle = "#cbd5e1";
+    ctx.beginPath();
+    ctx.arc(pad + p.x, offsetY + p.y, 3.5 * scaleFactor, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  };
+
+  // === Trazos ===
+  drawLine(P.S, P.N, lineColor.cranial);
+  drawLine(P.N, P.A, lineColor.cranial);
+  drawLine(P.N, P.B, "#f97316");
+  drawLine(P.Po, P.Or, "#a78bfa", true);
+  drawLine(P.Go, P.Me, "#94a3b8", true);
+  drawLine(P.Go, P.Gn, "#94a3b8");
+  if (U1_axisE) drawLine(...U1_axisE, lineColor.dental);
+  if (L1_axisE) drawLine(...L1_axisE, lineColor.dental);
+  drawLine(P.Prn, P.PgS, lineColor.soft, true);
+
+  if (useBjork) {
+    if (P.N && P.S && P.Ar) drawArc(P.S, P.N, P.Ar, "#22d3ee", 60, `Silla ${toFixedOrDash(Saddle_NSAr)}°`);
+    if (P.S && P.Ar && P.Go) drawArc(P.Ar, P.S, P.Go, "#a78bfa", 60, `Articular ${toFixedOrDash(Articular_SArGo)}°`);
+    if (P.Ar && P.Go && P.Me) drawArc(P.Go, P.Ar, P.Me, "#fb7185", 60, `Gonial ${toFixedOrDash(Gonial_ArGoMe)}°`);
+  }
+
+  Object.values(P).forEach(drawPoint);
+
+
+// === Sidebar (versión ajustada — tipografía más compacta) ===
+const x0 = pad + scaledW + 24;
+let y = offsetY + 38 * scaleFactor; // aire superior
+
+// === Encabezado lateral ===
+ctx.fillStyle = "#000000";
+ctx.font = `700 ${22 * scaleFactor}px system-ui`;
+ctx.fillText("Cefalometría", x0, y);
+y += 30 * scaleFactor;
+
+// === Divider reutilizable ===
+const divider = (extraGap: number = 10 * scaleFactor) => {
+  // deja margen arriba
+  y += extraGap;
+
+  // dibuja la línea divisoria
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x0, y);
+  ctx.lineTo(x0 + sidebarW - 48, y);
+  ctx.stroke();
+
+  // deja margen abajo
+  y += extraGap * 1.5;
+};
+
+// === Línea clave:valor ===
+const lineKV = (k: string, v: string) => {
+  ctx.font = `400 ${14 * scaleFactor}px system-ui`;
+  ctx.fillStyle = "#000000";
+  ctx.textAlign = "left";
+  ctx.fillText(k, x0, y);
+  ctx.textAlign = "right";
+  ctx.fillText(v, x0 + sidebarW - 48, y);
+  ctx.textAlign = "left";
+  y += 18 * scaleFactor;
+};
+
+// === Título de sección ===
+const sectionTitle = (t: string) => {
+  ctx.fillStyle = "#000000";
+  ctx.font = `600 ${16 * scaleFactor}px system-ui`;
+  ctx.fillText(t, x0, y);
+  y += 22 * scaleFactor;
+};
+
+// === Datos del paciente ===
+sectionTitle("Datos del paciente");
+lineKV("Nombre", pNombre || "—");
+lineKV("Edad", pEdad ? `${pEdad} años` : "—");
+lineKV("Sexo", pSexo || "—");
+lineKV("Doctor", pDoctor || "—");
+divider();
+
+// === Steiner ===
+if (useSteiner) {
+  sectionTitle("Steiner");
+  lineKV("SNA (°)", toFixedOrDash(SNA));
+  lineKV("SNB (°)", toFixedOrDash(SNB));
+  lineKV("ANB (°)", toFixedOrDash(ANB));
+  lineKV("SN–GoGn (°)", toFixedOrDash(SN_GoGn));
+  lineKV("U1–NA (mm)", toFixedOrDash(U1_NA_mm));
+  lineKV("L1–NB (mm)", toFixedOrDash(L1_NB_mm));
+  divider();
+}
+
+// === Björk–Jarabak ===
+if (useBjork) {
+  sectionTitle("Björk–Jarabak");
+  lineKV("Ángulo Silla (°)", toFixedOrDash(Saddle_NSAr));
+  lineKV("Ángulo Articular (°)", toFixedOrDash(Articular_SArGo));
+  lineKV("Ángulo Gonial (°)", toFixedOrDash(Gonial_ArGoMe));
+  lineKV("Jarabak (%)", toFixedOrDash(Jarabak_Ratio));
+  divider();
+}
+
+// === Resumen clínico ===
+sectionTitle("Resumen clínico");
+ctx.fillStyle = "#000000";
+ctx.font = `400 ${13 * scaleFactor}px system-ui`;
+const wrapW = sidebarW - 48;
+const lh = 15 * scaleFactor;
+const lines = wrapText(ctx, resumen, wrapW);
+lines.forEach((ln) => { ctx.fillText(ln, x0, y); y += lh; });
+
+
+  // === Pie de página ===
+  const footerH = 45 * scaleFactor;
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, H - footerH, W, footerH);
+  ctx.font = `${12 * scaleFactor}px system-ui`;
+  ctx.fillStyle = "#adadad";
+  ctx.textAlign = "center";
+  ctx.fillText("Realizado en: cefalometria.odontover.com | Cortesía del Dr. Fernando Juárez [@dr.juarez]", W / 2, H - 16 * scaleFactor);
+  ctx.textAlign = "left";
+
+  return canvas;
+}
 
   function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number){
     const words = text.split(/\s+/); const lines: string[] = []; let line = "";
@@ -441,7 +632,7 @@ async function exportSheetPDF() {
       push("Pg–NB (±)", Pg_NB_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd, Boolean(mmPerPx));
     }
     if (useBjork){ rows.push({k:"— Björk–Jarabak —",v:"",u:"",z:"",i:""});
-      push("Saddle (N–S–Ar)", Saddle_NSAr, "°", DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd);
+      push("Silla (N–S–Ar)", Saddle_NSAr, "°", DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd);
       push("Articular (S–Ar–Go)", Articular_SArGo, "°", DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd);
       push("Gonial (Ar–Go–Me)", Gonial_ArGoMe, "°", DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd);
       push("Suma Björk", Sum_Bjork, "°", DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd);
@@ -553,7 +744,7 @@ async function exportSheetPDF() {
                 </>)}
                 {useBjork && (<>
                   <tr><td colSpan={5} className="pt-2 text-sky-300">— Björk–Jarabak —</td></tr>
-                  <RowZInt name="Saddle (N–S–Ar)" value={Saddle_NSAr} units="°" norm={DEFAULT_NORMS.bjork.Saddle_NSAr} />
+                  <RowZInt name="Silla (N–S–Ar)" value={Saddle_NSAr} units="°" norm={DEFAULT_NORMS.bjork.Saddle_NSAr} />
                   <RowZInt name="Articular (S–Ar–Go)" value={Articular_SArGo} units="°" norm={DEFAULT_NORMS.bjork.Articular_SArGo} />
                   <RowZInt name="Gonial (Ar–Go–Me)" value={Gonial_ArGoMe} units="°" norm={DEFAULT_NORMS.bjork.Gonial_ArGoMe} />
                   <RowZInt name="Suma Björk" value={Sum_Bjork} units="°" norm={DEFAULT_NORMS.bjork.Sum_Bjork} />
@@ -629,7 +820,7 @@ async function exportSheetPDF() {
                   </g>)}
                   {showOverlay && has("N") && has("S") && has("Ar") && (<g>
                     <path d={arcPath(points.S!, points.N!, points.Ar!)} stroke="#16a34a" strokeWidth={2} fill="none" strokeDasharray="4 3" />
-                    <AngleLabel p={{ x: points.S!.x + 40, y: points.S!.y - 10 }} text={`Saddle ${toFixedOrDash(Saddle_NSAr)}`} />
+                    <AngleLabel p={{ x: points.S!.x + 40, y: points.S!.y - 10 }} text={`Silla ${toFixedOrDash(Saddle_NSAr)}`} />
                   </g>)}
                   {showOverlay && has("S") && has("Ar") && has("Go") && (<g>
                     <path d={arcPath(points.Ar!, points.S!, points.Go!)} stroke="#d946ef" strokeWidth={2} fill="none" strokeDasharray="4 3" />
