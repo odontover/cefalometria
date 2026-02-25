@@ -15,6 +15,11 @@ function angleBetweenLines(pA1: Pt, pA2: Pt, pB1: Pt, pB2: Pt) {
   if (m1 === 0 || m2 === 0) return NaN; let cos = dot / (m1 * m2); cos = Math.max(-1, Math.min(1, cos));
   return Math.acos(cos) * 180 / Math.PI;
 }
+function acuteAngleBetweenLines(pA1: Pt, pA2: Pt, pB1: Pt, pB2: Pt) {
+  const ang = angleBetweenLines(pA1, pA2, pB1, pB2);
+  if (Number.isNaN(ang)) return NaN;
+  return ang > 90 ? 180 - ang : ang; // fuerza el ángulo agudo (clínico)
+}
 function pointLineDistanceSigned(p: Pt, a: Pt, b: Pt) {
   const num = (b.x - a.x) * (a.y - p.y) - (a.x - p.x) * (b.y - a.y); const den = Math.hypot(b.x - a.x, b.y - a.y);
   return den === 0 ? NaN : num / den;
@@ -294,9 +299,19 @@ useEffect(() => {
   const SN_GoGn = useMemo(() => (has("S")&&has("N")&&has("Go")&&has("Gn"))? angleBetweenLines(points.S!, points.N!, points.Go!, points.Gn!) : NaN, [points]);
   const U1_axis = has("U1T")&&has("U1A")? [points.U1T!, points.U1A!] as [Pt,Pt] : null;
   const L1_axis = has("L1T")&&has("L1A")? [points.L1T!, points.L1A!] as [Pt,Pt] : null;
-  const U1_NA_deg = useMemo(() => (U1_axis && has("N") && has("A"))? angleBetweenLines(U1_axis[0], U1_axis[1], points.N!, points.A!) : NaN, [points]);
+  const U1_NA_deg = useMemo(
+  () => (U1_axis && has("N") && has("A"))
+    ? acuteAngleBetweenLines(U1_axis[0], U1_axis[1], points.N!, points.A!)
+    : NaN,
+  [points]
+);
   const U1_NA_mm  = useMemo(() => (has("U1T")&&has("N")&&has("A"))? Math.abs(mm(pointLineDistanceSigned(points.U1T!, points.N!, points.A!))) : NaN, [points, mmPerPx]);
-  const L1_NB_deg = useMemo(() => (L1_axis && has("N") && has("B"))? angleBetweenLines(L1_axis[0], L1_axis[1], points.N!, points.B!) : NaN, [points]);
+  const L1_NB_deg = useMemo(
+  () => (L1_axis && has("N") && has("B"))
+    ? acuteAngleBetweenLines(L1_axis[0], L1_axis[1], points.N!, points.B!)
+    : NaN,
+  [points]
+);
   const L1_NB_mm  = useMemo(() => (has("L1T")&&has("N")&&has("B"))? Math.abs(mm(pointLineDistanceSigned(points.L1T!, points.N!, points.B!))) : NaN, [points, mmPerPx]);
   const Interincisal = useMemo(() => (U1_axis && L1_axis)? angleBetweenLines(U1_axis[0], U1_axis[1], L1_axis[0], L1_axis[1]) : NaN, [points]);
   const Pg_NB_mm = useMemo(() => (has("Pg")&&has("N")&&has("B"))? mm(pointLineDistanceSigned(points.Pg!, points.N!, points.B!)) : NaN, [points, mmPerPx]);
