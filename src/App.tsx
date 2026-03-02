@@ -375,7 +375,8 @@ const Ocl_SN = useMemo(() => {
   const P1 = hasOcclusal ? points.Oc1! : has("Po") ? points.Po! : null;
   const P2 = hasOcclusal ? points.Oc2! : has("Or") ? points.Or! : null;
   if (!(P1 && P2 && has("S") && has("N"))) return NaN;
-  return angleBetweenLines(P1, P2, points.S!, points.N!);
+
+  return acuteAngleBetweenLines(P1, P2, points.S!, points.N!);
 }, [points]);
 
 // === Eje facial (Downs / Ricketts) — ángulo inferior (suplementario) ===
