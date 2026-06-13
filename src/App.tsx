@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { jsPDF } from "jspdf"; // ← NUEVA importación para PDF real
+import { jsPDF } from "jspdf";
 
 // Helpers mínimos
 function distance(a: Pt, b: Pt) { return Math.hypot(a.x - b.x, a.y - b.y); }
@@ -48,11 +48,128 @@ function interpWithTolerance(val: number, mean: number, units: string, enabled =
   const tol = toleranceForUnits(units); if (tol == null) return "—";
   const d = val - mean; if (Math.abs(d) <= tol) return "normal"; return d > 0 ? "mayor" : "menor";
 }
+const FACIAL_THIRD_TARGET_PERCENT = 100 / 3;
+const FACIAL_THIRD_TOLERANCE_PERCENT = 3;
+const FACIAL_THIRD_TOLERANCE_LABEL = `±${FACIAL_THIRD_TOLERANCE_PERCENT}%`;
+function facialThirdDelta(percent: number) {
+  if (Number.isNaN(percent)) return NaN;
+  return percent - FACIAL_THIRD_TARGET_PERCENT;
+}
+function facialThirdInterpretation(percent: number) {
+  if (Number.isNaN(percent)) return "—";
+  const delta = facialThirdDelta(percent);
+  if (Math.abs(delta) <= FACIAL_THIRD_TOLERANCE_PERCENT) return "normal";
+  return delta > 0 ? "aumentado" : "disminuido";
+}
+function clinicalInterpretationForMeasure(name: string, value: number, units: string, enabled = true) {
+  if (Number.isNaN(value)) return "—";
+  const is = (mean: number, unit: string, enabled = true) => interpWithTolerance(value, mean, unit, enabled);
+  const state = (mean: number, unit: string, enabled = true) => is(mean, unit, enabled);
+  if (name === "SNA") {
+    const s = state(DEFAULT_NORMS.steiner.SNA.mean, "°");
+    return s === "mayor" ? "protrusión maxilar" : s === "menor" ? "retrusión maxilar" : "normal";
+  }
+  if (name === "SNB") {
+    const s = state(DEFAULT_NORMS.steiner.SNB.mean, "°");
+    return s === "mayor" ? "prognatismo mandibular" : s === "menor" ? "retrognatismo mandibular" : "normal";
+  }
+  if (name === "ANB") {
+    const s = state(DEFAULT_NORMS.steiner.ANB.mean, "°");
+    return s === "mayor" ? "Clase II" : s === "menor" ? "Clase III" : "Clase I";
+  }
+  if (name === "SN–GoGn") {
+    const s = state(DEFAULT_NORMS.steiner.SN_GoGn.mean, "°");
+    return s === "mayor" ? "hiperdivergente" : s === "menor" ? "hipodivergente" : "normal";
+  }
+  if (name === "U1–NA (°)") {
+    const s = state(DEFAULT_NORMS.steiner.U1_NA_deg.mean, "°");
+    return s === "mayor" ? "proinclinación" : s === "menor" ? "retroinclinación" : "normal";
+  }
+  if (name === "U1–NA (mm)") {
+    const s = state(DEFAULT_NORMS.steiner.U1_NA_mm.mean, "mm");
+    return s === "mayor" ? "protrusión" : s === "menor" ? "retrusión" : "normal";
+  }
+  if (name === "L1–NB (°)") {
+    const s = state(DEFAULT_NORMS.steiner.L1_NB_deg.mean, "°");
+    return s === "mayor" ? "proinclinación" : s === "menor" ? "retroinclinación" : "normal";
+  }
+  if (name === "L1–NB (mm)") {
+    const s = state(DEFAULT_NORMS.steiner.L1_NB_mm.mean, "mm");
+    return s === "mayor" ? "protrusión" : s === "menor" ? "retrusión" : "normal";
+  }
+  if (name === "Interincisal") {
+    const s = state(DEFAULT_NORMS.steiner.Interincisal.mean, "°");
+    return s === "mayor" ? "retroinclinación incisiva" : s === "menor" ? "biprotrusión incisiva" : "normal";
+  }
+  if (name === "Pg–NB (±)") {
+    const s = state(DEFAULT_NORMS.steiner.Pg_NB_mm.mean, "mm");
+    return s === "mayor" ? "protrusión mentoniana" : s === "menor" ? "retrusión mentoniana" : "normal";
+  }
+  if (name === "Silla (N–S–Ar)" || name === "Articular (S–Ar–Go)" || name === "Gonial (Ar–Go–Me)") {
+    const means = {
+      "Silla (N–S–Ar)": DEFAULT_NORMS.bjork.Saddle_NSAr.mean,
+      "Articular (S–Ar–Go)": DEFAULT_NORMS.bjork.Articular_SArGo.mean,
+      "Gonial (Ar–Go–Me)": DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean,
+    } as const;
+    const s = state(means[name as keyof typeof means], "°");
+    return s === "mayor" ? "aumentado" : s === "menor" ? "disminuido" : "normal";
+  }
+  if (name === "Suma Björk") {
+    const s = state(DEFAULT_NORMS.bjork.Sum_Bjork.mean, "°");
+    return s === "mayor" ? "aumentada" : s === "menor" ? "disminuida" : "normal";
+  }
+  if (name === "Jarabak % (S–Go/N–Me)") {
+    const s = state(DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, "%");
+    return s === "mayor" ? "aumentado" : s === "menor" ? "disminuido" : "normal";
+  }
+  if (name === "IMPA (°)") {
+    const s = state(DEFAULT_NORMS.extended.IMPA.mean, "°");
+    return s === "mayor" ? "proinclinación" : s === "menor" ? "retroinclinación" : "normal";
+  }
+  if (name === "Wits (mm)") {
+    const s = state(DEFAULT_NORMS.extended.Wits.mean, "mm");
+    return s === "mayor" ? "Clase II" : s === "menor" ? "Clase III" : "Clase I";
+  }
+  if (name === "Beta Angle (°)") {
+    const s = state(DEFAULT_NORMS.extended.Beta_Angle.mean, "°");
+    return s === "mayor" ? "Clase II" : s === "menor" ? "Clase III" : "Clase I";
+  }
+  if (name === "Plano Oclusal – SN (°)") {
+    const s = state(DEFAULT_NORMS.extended.Ocl_SN.mean, "°");
+    return s === "mayor" ? "inclinación aumentada" : s === "menor" ? "inclinación disminuida" : "normal";
+  }
+  if (name === "FMA (°)") {
+    const s = state(26, "°");
+    return s === "mayor" ? "hiperdivergente" : s === "menor" ? "hipodivergente" : "normal";
+  }
+  if (name === "Overjet estimado (mm)") {
+    const s = state(2.5, "mm", enabled);
+    return s === "mayor" ? "aumentado" : s === "menor" ? "disminuido" : "normal";
+  }
+  if (name === "Overbite estimado (mm)") {
+    const s = state(3, "mm", enabled);
+    return s === "mayor" ? "aumentado" : s === "menor" ? "disminuido" : "normal";
+  }
+  if (name === "Eje Facial (°)") {
+    const s = state(DEFAULT_NORMS.extended.Facial_Angle.mean, "°");
+    return s === "mayor" ? "braquifacial" : s === "menor" ? "dolicofacial" : "normal";
+  }
+  if (name === "U1–SN (°)") {
+    const s = state(DEFAULT_NORMS.extended.U1_SN.mean, "°");
+    return s === "mayor" ? "proinclinación" : s === "menor" ? "retroinclinación" : "normal";
+  }
+  if (name === "Labio inf – E-line (±)") {
+    const s = state(DEFAULT_NORMS.soft.ELine_Li_mm.mean, "mm", enabled);
+    return s === "mayor" ? "protrusión labial" : s === "menor" ? "retrusión labial" : "normal";
+  }
+  if (name.toLowerCase().includes("tercio")) return facialThirdInterpretation(value);
+  return "normal";
+}
 
 // Types
 type Pt = { x: number; y: number };
 type LandmarkKey =
-  "S"|"N"|"A"|"B"|"Po"|"Or"|"Go"|"Me"|"Pg"|"Gn"|"Ar"|"U1T"|"U1A"|"L1T"|"L1A"|"Prn"|"PgS"|"Li"|"Ba"|"Pt"|"Co"|"Oc1"|"Oc2";
+  "S"|"N"|"A"|"B"|"Po"|"Or"|"Go"|"Me"|"Pg"|"Gn"|"Ar"|"U1T"|"U1A"|"L1T"|"L1A"|"Prn"|"PgS"|"Li"|"Tr"|"G"|"Sn"|"MeS"|"Ba"|"Pt"|"Co"|"Oc1"|"Oc2";
 
 const LANDMARKS = [
   { key: "S", label: "S – Sella", desc: "Centro de la silla turca" },
@@ -73,6 +190,10 @@ const LANDMARKS = [
   { key: "Prn", label: "Prn – Pronasale", desc: "Punto más anterior del dorso nasal" },
   { key: "PgS", label: "Pg' – Pogonion blando", desc: "Pogonion de tejidos blandos" },
   { key: "Li", label: "Li – Labrale inferius", desc: "Punto más anterior del labio inferior" },
+  { key: "Tr", label: "Tr – Trichion", desc: "Línea de implantación del cabello en tejido blando" },
+  { key: "G", label: "G – Glabela blanda", desc: "Punto más prominente de la frente en tejido blando" },
+  { key: "Sn", label: "Sn – Subnasale", desc: "Unión columela-labio superior" },
+  { key: "MeS", label: "Me' – Menton blando", desc: "Punto más inferior del mentón en tejido blando" },
   { key: "Ba", label: "Ba – Basion", desc: "Punto más inferior del foramen magno" },
   { key: "Pt", label: "Pt – Pterigoideo", desc: "Punto más posterior del contorno pterigoideo" },
   { key: "Co", label: "Co – Condylion", desc: "Punto más posterosuperior del cóndilo mandibular" },
@@ -87,6 +208,7 @@ const DEFAULT_NORMS = {
   extended: {
     IMPA: { mean: 90, sd: 5 },
     Wits: { mean: 0, sd: 1 },           // Aproximación centrada (ver nota Wits abajo)
+    Beta_Angle: { mean: 27, sd: 4 },
     Ocl_SN: { mean: 14, sd: 4 },
     Facial_Angle: { mean: 87, sd: 3 },  // Downs/Ricketts
     U1_SN: { mean: 104, sd: 5 }
@@ -193,7 +315,6 @@ export default function App() {
 
 function CephTracer() {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
   const [calibClicks, setCalibClicks] = useState<Pt[]>([]);
   const [mmKnown, setMmKnown] = useState<number>(20);
   const [mmPerPx, setMmPerPx] = useState<number | null>(null); // mm por px (en tamaño renderizado)
@@ -217,9 +338,6 @@ function CephTracer() {
   const [lastCSV, setLastCSV] = useState<string | null>(null);
   const [fixedScale, setFixedScale] = useState<{ sx: number; sy: number } | null>(null);
 
-  useEffect(() => {
-    if (!imgSrc) return; const i = new Image(); i.onload = () => setImgSize({ w: i.naturalWidth, h: i.naturalHeight }); i.src = imgSrc;
-  }, [imgSrc]);
   // Fijar escala real solo una vez, al cargar la imagen
 useEffect(() => {
   if (imgRef.current && imgSrc) {
@@ -365,7 +483,7 @@ const Wits = useMemo(() => {
 
   // 5️⃣ Convertir distancia en milímetros (usa mmPerPx si lo tienes)
   const distPx = Math.abs(proj);
-  const distMm = mmPerPx ? distPx * mmPerPx : distPx;
+  const distMm = mmPerPx ? distPx * mmPerPx : NaN;
 
   return sign * distMm;
 }, [points, mmPerPx]);
@@ -393,15 +511,126 @@ const U1_SN = useMemo(() =>
     : NaN,
   [points]
 );
+const FMA = useMemo(() => {
+  const mandibularA = has("Go") ? points.Go! : null;
+  const mandibularB = has("Me") ? points.Me! : has("Gn") ? points.Gn! : null;
+  return has("Po") && has("Or") && mandibularA && mandibularB
+    ? acuteAngleBetweenLines(points.Po!, points.Or!, mandibularA, mandibularB)
+    : NaN;
+}, [points]);
+const Beta_Angle = useMemo(() =>
+  (has("A") && has("B") && has("Co"))
+    ? angleBetween(points.A!, points.Co!, points.B!)
+    : NaN,
+  [points]
+);
+const incisalOverlap = useMemo(() => {
+  if (!(has("U1T") && has("L1T") && has("Oc1") && has("Oc2") && mmPerPx)) {
+    return { overjet: NaN, overbite: NaN };
+  }
+  const dx = points.Oc2!.x - points.Oc1!.x;
+  const dy = points.Oc2!.y - points.Oc1!.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return { overjet: NaN, overbite: NaN };
+  const ux = dx / len;
+  const uy = dy / len;
+  const delta = { x: points.U1T!.x - points.L1T!.x, y: points.U1T!.y - points.L1T!.y };
+  const overjetPx = Math.abs(delta.x * ux + delta.y * uy);
+  const overbitePx = Math.abs(delta.x * -uy + delta.y * ux);
+  return { overjet: overjetPx * mmPerPx, overbite: overbitePx * mmPerPx };
+}, [points, mmPerPx]);
+const facialThirds = useMemo(() => {
+  const linearMm = (a?: Pt, b?: Pt) => (a && b && mmPerPx ? distance(a, b) * mmPerPx : NaN);
+  const upper = linearMm(points.Tr, points.G);
+  const middle = linearMm(points.G, points.Sn);
+  const lower = linearMm(points.Sn, points.MeS);
+  const total = [upper, middle, lower].every((v) => !Number.isNaN(v)) ? upper + middle + lower : NaN;
+  const percent = (value: number) => !Number.isNaN(total) && total > 0 ? (value / total) * 100 : NaN;
+  return {
+    upper,
+    middle,
+    lower,
+    upperPercent: percent(upper),
+    middlePercent: percent(middle),
+    lowerPercent: percent(lower),
+  };
+}, [points, mmPerPx]);
   const scaleLabel = mmPerPx ? `Escala (vista): ${(1 / mmPerPx).toFixed(2)} px/mm · ${mmPerPx.toFixed(4)} mm/px` : "Sin calibrar";
 
   function setManualLink(url: string, name: string) { if (downloadHint?.url?.startsWith("blob:")) URL.revokeObjectURL(downloadHint.url); setDownloadHint({ url, name }); }
   function exportJSON(){ const blob = new Blob([JSON.stringify({ points, mmPerPx }, null, 2)], { type: "application/json" }); triggerDownload(blob, "cefalo_trazado.json"); }
   function importJSON(e: React.ChangeEvent<HTMLInputElement>){ const f = e.target.files?.[0]; if(!f) return; const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(String(r.result)); if (data.points) setPoints(data.points); if (typeof data.mmPerPx === "number") setMmPerPx(data.mmPerPx); } catch { alert("JSON inválido"); } }; r.readAsText(f); }
 
+  function dentxLifeRows() {
+    const sex = pSexo === "F" ? "Femenino" : pSexo === "M" ? "Masculino" : pSexo === "X" ? "Otro" : "";
+    const lipsSuggestion = Number.isNaN(ELine_Li_mm)
+      ? ""
+      : ELine_Li_mm > 0
+        ? "Protruidos"
+        : ELine_Li_mm < -4
+          ? "Retruidos"
+          : "";
+    const row = (field: string, label: string, value: string, units: string, source: string, notes = "") =>
+      ({ field, label, value, units, source, notes });
+    return [
+      row("Nombre completo", "Nombre completo", pNombre, "", "Datos del paciente", "Copiar manualmente si coincide con el expediente."),
+      row("Sexo", "Sexo", sex, "", "Datos del paciente"),
+      row("Fecha de consulta", "Fecha de consulta", pFecha, "", "Datos del paciente"),
+      row("Dentista tratante", "Dentista tratante", pDoctor, "", "Datos del paciente"),
+      row("SNA", "SNA", toFixedOrDash(SNA), "°", "Lateral de cráneo"),
+      row("SNB", "SNB", toFixedOrDash(SNB), "°", "Lateral de cráneo"),
+      row("ANB", "ANB", toFixedOrDash(ANB), "°", "Calculado: SNA - SNB", "Se puede recalcular si capturas SNA y SNB."),
+      row("Wits", "Wits", toFixedOrDash(Wits), "mm", "Lateral de cráneo + plano oclusal", "Requiere calibración y puntos A, B, Oc1, Oc2."),
+      row("Overjet estimado", "Overjet estimado", toFixedOrDash(incisalOverlap.overjet), "mm", "Lateral de cráneo + plano oclusal", "Estimación cefalométrica; confirmar clínicamente/modelos."),
+      row("Overbite estimado", "Overbite estimado", toFixedOrDash(incisalOverlap.overbite), "mm", "Lateral de cráneo + plano oclusal", "Estimación cefalométrica; confirmar clínicamente/modelos."),
+      row("SN-GoGn", "SN-GoGn", toFixedOrDash(SN_GoGn), "°", "Lateral de cráneo"),
+      row("FMA", "FMA", toFixedOrDash(FMA), "°", "Frankfort Po-Or vs plano mandibular Go-Me", "Usa Go-Gn si no hay Me."),
+      row("Jarabak", "Jarabak", toFixedOrDash(Jarabak_Ratio), "%", "S-Go / N-Me", "Porcentaje facial posterior/anterior."),
+      row("Labios", "Labios", lipsSuggestion, "", "Sugerencia por E-line", Number.isNaN(ELine_Li_mm) ? "Sin Li, Prn y Pg blando." : `E-line Li: ${toFixedOrDash(ELine_Li_mm)} mm; revisar clínicamente antes de capturar.`),
+    ];
+  }
+
+  function exportDentxLifeCSV() {
+    const headers = ["Campo DentxLife", "Etiqueta", "Valor sugerido", "Unidades", "Origen", "Notas"];
+    const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const csv = [headers, ...dentxLifeRows().map((r) => [r.field, r.label, r.value, r.units, r.source, r.notes])]
+      .map((r) => r.map(escape).join(","))
+      .join("\r\n");
+    setLastCSV(csv);
+    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), "dentxlife_compatible_cefalo.csv");
+  }
+
+  function exportDentxLifeJSON() {
+    const payload = {
+      schema: "dentxlife-ortho.manual-ceph-transfer.v1",
+      generatedAt: new Date().toISOString(),
+      patient: { fullName: pNombre, age: pEdad, sex: pSexo, consultationDate: pFecha, doctor: pDoctor },
+      values: dentxLifeRows(),
+      notFromLateralCeph: [
+        "sagittal.molarRight",
+        "sagittal.molarLeft",
+        "sagittal.canineRight",
+        "sagittal.canineLeft",
+        "sagittal.upperMidline",
+        "sagittal.lowerMidline",
+        "vertical.incisorExposure",
+        "vertical.upperThird",
+        "vertical.middleThird",
+        "vertical.lowerThird",
+        "vertical.lipCompetence",
+        "vertical.gingivalExposureRest",
+        "transverse.*",
+        "functional.*",
+        "risk.*",
+      ],
+      note: "Archivo para captura manual en DentxLife Ortho. No sustituye mediciones clínicas, modelos, CBCT ni fotografías.",
+    };
+    triggerDownload(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }), "dentxlife_compatible_cefalo.json");
+  }
+
   function exportCSV() {
   const rows: string[][] = [
-    ["Medida", "Valor", "Norma", mmPerPx ? "Unidades" : "Unidades (px)", "z-score", "Interpretación"]
+    ["Medida", "Valor", "Norma", "Unidades", "z-score", "Interpretación"]
   ];
   const interp = (val: number, mean: number, units: string, enabled = true) =>
     interpWithTolerance(val, mean, units, enabled);
@@ -426,7 +655,7 @@ const U1_SN = useMemo(() =>
         toFixedOrDash(zScore(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, DEFAULT_NORMS.steiner.U1_NA_deg.sd)),
         interp(U1_NA_deg, DEFAULT_NORMS.steiner.U1_NA_deg.mean, "°")],
       ["U1–NA (mm)", toFixedOrDash(U1_NA_mm), toFixedOrDash(DEFAULT_NORMS.steiner.U1_NA_mm.mean),
-        mmPerPx ? "mm" : "px",
+        "mm",
         mmPerPx
           ? toFixedOrDash(zScore(U1_NA_mm, DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd))
           : "—",
@@ -437,7 +666,7 @@ const U1_SN = useMemo(() =>
         toFixedOrDash(zScore(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, DEFAULT_NORMS.steiner.L1_NB_deg.sd)),
         interp(L1_NB_deg, DEFAULT_NORMS.steiner.L1_NB_deg.mean, "°")],
       ["L1–NB (mm)", toFixedOrDash(L1_NB_mm), toFixedOrDash(DEFAULT_NORMS.steiner.L1_NB_mm.mean),
-        mmPerPx ? "mm" : "px",
+        "mm",
         mmPerPx
           ? toFixedOrDash(zScore(L1_NB_mm, DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd))
           : "—",
@@ -448,7 +677,7 @@ const U1_SN = useMemo(() =>
         toFixedOrDash(zScore(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, DEFAULT_NORMS.steiner.Interincisal.sd)),
         interp(Interincisal, DEFAULT_NORMS.steiner.Interincisal.mean, "°")],
       ["Pg–NB (±)", toFixedOrDash(Pg_NB_mm), toFixedOrDash(DEFAULT_NORMS.steiner.Pg_NB_mm.mean),
-        mmPerPx ? "mm" : "px",
+        "mm",
         mmPerPx
           ? toFixedOrDash(zScore(Pg_NB_mm, DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd))
           : "—",
@@ -482,7 +711,7 @@ const U1_SN = useMemo(() =>
   rows.push(
     ["— Tejidos blandos —", "", "", "", "", ""],
     ["Labio inf – E-line (±)", toFixedOrDash(ELine_Li_mm), toFixedOrDash(DEFAULT_NORMS.soft.ELine_Li_mm.mean),
-      mmPerPx ? "mm" : "px",
+      "mm",
       mmPerPx
         ? toFixedOrDash(zScore(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd))
         : "—",
@@ -958,15 +1187,11 @@ if (P.U1T && P.U1A && P.S && P.N) {
 
   async function exportSheetPNG(){ const c = await renderSheetCanvas(); if(!c) return; const blob: Blob | null = await new Promise(res=>c.toBlob(res,"image/png")); if(!blob){ const url = c.toDataURL("image/png"); setManualLink(url, "cefalometria.png"); try{ const a=document.createElement("a"); a.href=url; a.download="cefalometria.png"; a.rel="noopener"; a.target="_blank"; document.body.appendChild(a); a.click(); a.remove(); }catch{} return;} triggerDownload(blob, "cefalometria.png"); }
   
-// 💾 Versión completa de exportSheetPDF con columna "Norma"
 async function exportSheetPDF() {
   const c = await renderSheetCanvas();
   if (!c) return;
 
-  // === Convierte canvas a imagen ===
   const dataUrl = c.toDataURL("image/png");
-
-  // === Crea PDF A4 ===
   const pdf = new jsPDF({
     orientation: c.width > c.height ? "landscape" : "portrait",
     unit: "mm",
@@ -976,244 +1201,152 @@ async function exportSheetPDF() {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const headerH = 18;
-
-  // === Encabezado Odontover ===
-  pdf.setFillColor(30, 41, 59);
-  pdf.rect(0, 0, pageWidth, headerH, "F");
-
-  try {
-    const logoImg = new Image();
-    logoImg.src = "/logo-odontover.png";
-    await new Promise((r) => {
-      logoImg.onload = r;
-      logoImg.onerror = r;
-    });
-    const maxH = headerH * 0.7;
-    const aspect = logoImg.width / logoImg.height;
-    const logoH = maxH;
-    const logoW = logoH * aspect;
-    const yLogo = (headerH - logoH) / 2;
-    pdf.addImage(logoImg, "PNG", 10, yLogo, logoW, logoH);
-  } catch {
-    console.warn("⚠️ Logo no cargado");
-  }
-
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(13);
-  pdf.setTextColor(226, 232, 240);
-  pdf.text("Cefalometría", 34, 11);
-
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(9);
-  pdf.setTextColor(147, 197, 253);
-  pdf.text("by Odontover.com", 34, 16);
-  pdf.setTextColor(203, 213, 225);
-  pdf.text(`${pFecha || todayISO()}`, pageWidth - 10, 11, { align: "right" });
-
-  // === Radiografía ===
-  const imgAspect = c.width / c.height;
-  let renderWidth = pageWidth * 0.58;
-  let renderHeight = renderWidth / imgAspect;
   const margin = 10;
+  const contentTop = headerH + 7;
+  const contentBottom = pageHeight - 12;
+  const contentWidth = pageWidth - margin * 2;
+
+  const drawHeader = () => {
+    pdf.setFillColor(255, 255, 255);
+    pdf.rect(0, 0, pageWidth, headerH, "F");
+    pdf.setDrawColor(217, 229, 234);
+    pdf.line(0, headerH, pageWidth, headerH);
+    pdf.setFillColor(14, 116, 144);
+    pdf.roundedRect(margin, 4, 10, 10, 2, 2, "F");
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(13);
+    pdf.setTextColor(16, 37, 51);
+    pdf.text("Cefalometría", margin + 14, 10);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.setTextColor(59, 139, 115);
+    pdf.text("Reporte cefalométrico clínico", margin + 14, 15);
+    pdf.setTextColor(71, 85, 105);
+    pdf.text(`${pFecha || todayISO()}`, pageWidth - margin, 11, { align: "right" });
+  };
+  const addPage = () => {
+    pdf.addPage();
+    drawHeader();
+    return contentTop;
+  };
+  const ensureSpace = (y: number, needed: number) => (y + needed > contentBottom ? addPage() : y);
+  const footerText = `Realizado en cefalometria.odontover.com · Cortesía del Dr. Fernando Juárez · ${new Date().toLocaleDateString("es-MX")}`;
+
+  drawHeader();
+
+  const imgAspect = c.width / c.height;
+  const sidebarW = Math.min(84, Math.max(70, pageWidth * 0.28));
+  let renderWidth = pageWidth - margin * 3 - sidebarW;
+  let renderHeight = renderWidth / imgAspect;
+  const maxImageHeight = pageHeight - headerH - 24;
+  if (renderHeight > maxImageHeight) {
+    renderHeight = maxImageHeight;
+    renderWidth = renderHeight * imgAspect;
+  }
   const imgX = margin;
-  const imgY = headerH + 5;
+  const imgY = contentTop;
   pdf.addImage(dataUrl, "PNG", imgX, imgY, renderWidth, renderHeight);
 
-  // === Sidebar (datos + medidas + resumen) ===
   let x0 = imgX + renderWidth + 8;
-  let y = headerH + 5;
-
-  const sectionTitle = (t: string) => {
+  let y = contentTop;
+  const sectionTitle = (t: string, x = x0) => {
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(8);
-    pdf.setTextColor(0, 0, 0);
-    pdf.text(t, x0, y);
-    y += 5;
+    pdf.setTextColor(14, 116, 144);
+    pdf.text(t, x, y);
+    y += 4.5;
   };
-
-// === Línea con norma basada en z-score (desviación estándar) ===
-const lineKVN = (k: string, vRaw: any, nRaw?: any, sdRaw?: any) => {
-  const v = parseFloat(vRaw);
-  const n = parseFloat(nRaw);
-  const sd = parseFloat(sdRaw);
-
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(7.5);
-  pdf.setTextColor(50);
-
-  // Si no hay datos válidos
-  if (isNaN(v) || isNaN(n) || isNaN(sd)) {
-    pdf.text(k, x0, y);
-    pdf.text(vRaw || "—", x0 + 45, y, { align: "right" });
-    if (nRaw) {
-      pdf.setTextColor(100, 180, 255);
-      pdf.text(nRaw, x0 + 63, y, { align: "right" });
-    }
-    pdf.setTextColor(50);
-    y += 3.2;
-    return;
-  }
-
-  // Calcular z-score
-  const z = zScore(v, n, sd);
-  const absZ = Math.abs(z);
-
-  // Asignar color y símbolo
-  let color: [number, number, number];
-  let sign = "";
-  let mark = "";
-
-  if (absZ <= 1) {
-    color = [0, 0, 0];       // dentro de 1σ → normal
-    mark = "(OK)";
-  } else if (z > 0) {
-    color = [220, 38, 38];   // > +1σ → aumentado
-    sign = "(+)";
-  } else {
-    color = [37, 99, 235];   // < –1σ → disminuido
-    sign = "(–)";
-  }
-
-  // Nombre
-  pdf.setTextColor(0);
-  pdf.text(k, x0, y);
-
-  // Valor coloreado
-  pdf.setTextColor(...color);
-  pdf.text(`${toFixedOrDash(v)} ${sign || mark}`, x0 + 45, y, { align: "right" });
-
-  // Norma (azul claro)
-  pdf.setTextColor(60);
-  pdf.text(toFixedOrDash(n), x0 + 63, y, { align: "right" });
-
-  // (Opcional) z-score numérico
-  pdf.setTextColor(100);
-  pdf.text(`${z >= 0 ? "+" : ""}${z.toFixed(2)}`, x0 + 75, y, { align: "right" });
-
-  // Restaurar color y avanzar
-  pdf.setTextColor(50);
-  y += 3.2;
-};
-
-// === Línea divisoria reutilizable (estilo encabezado) ===
-const divider = (space = 4, width = 78, color = 160) => {
-  pdf.setDrawColor(color);       // tono gris medio
-  pdf.setLineWidth(0.3);         // línea delgada y elegante
-  pdf.line(x0, y, x0 + width, y);
-  y += space;                    // agrega espacio después de la línea
-};
 
   // Datos del paciente
   sectionTitle("DATOS DEL PACIENTE");
-  lineKVN("Nombre", pNombre || "—");
-  lineKVN("Edad", pEdad ? `${pEdad} años` : "—");
-  lineKVN("Sexo", pSexo || "—");
-  lineKVN("Doctor", pDoctor || "—");
-  divider(4);
-
-// === Encabezado de columnas ===
-pdf.setFont("helvetica", "bold");
-pdf.setFontSize(8);
-pdf.setTextColor(80);
-
-const headerY = y; // posición actual del cursor vertical
-pdf.text("Medida", x0, headerY);
-pdf.text("Valor", x0 + 45, headerY, { align: "right" });
-pdf.text("Norma", x0 + 63, headerY, { align: "right" });
-pdf.text("SD", x0 + 75, headerY, { align: "right" });
-
-// línea divisoria debajo del encabezado
-pdf.setDrawColor(160);
-pdf.line(x0, headerY + 1.5, x0 + 78, headerY + 1.5);
-
-// avanzar un poco hacia abajo para las filas
-y += 5;
-
-  // === Steiner ===
-sectionTitle("Steiner");
-lineKVN("SNA (°)", toFixedOrDash(SNA),
-  toFixedOrDash(DEFAULT_NORMS.steiner.SNA.mean),
-  DEFAULT_NORMS.steiner.SNA.sd);
-lineKVN("SNB (°)", toFixedOrDash(SNB),
-  toFixedOrDash(DEFAULT_NORMS.steiner.SNB.mean),
-  DEFAULT_NORMS.steiner.SNB.sd);
-lineKVN("ANB (°)", toFixedOrDash(ANB),
-  toFixedOrDash(DEFAULT_NORMS.steiner.ANB.mean),
-  DEFAULT_NORMS.steiner.ANB.sd);
-lineKVN("SN–GoGn (°)", toFixedOrDash(SN_GoGn),
-  toFixedOrDash(DEFAULT_NORMS.steiner.SN_GoGn.mean),
-  DEFAULT_NORMS.steiner.SN_GoGn.sd);
-lineKVN("U1–NA (mm)", toFixedOrDash(U1_NA_mm),
-  toFixedOrDash(DEFAULT_NORMS.steiner.U1_NA_mm.mean),
-  DEFAULT_NORMS.steiner.U1_NA_mm.sd);
-lineKVN("L1–NB (mm)", toFixedOrDash(L1_NB_mm),
-  toFixedOrDash(DEFAULT_NORMS.steiner.L1_NB_mm.mean),
-  DEFAULT_NORMS.steiner.L1_NB_mm.sd);
-divider(4);
-
-// === Björk–Jarabak ===
-sectionTitle("Björk–Jarabak");
-lineKVN("Silla (°)", toFixedOrDash(Saddle_NSAr),
-  toFixedOrDash(DEFAULT_NORMS.bjork.Saddle_NSAr.mean),
-  DEFAULT_NORMS.bjork.Saddle_NSAr.sd);
-lineKVN("Articular (°)", toFixedOrDash(Articular_SArGo),
-  toFixedOrDash(DEFAULT_NORMS.bjork.Articular_SArGo.mean),
-  DEFAULT_NORMS.bjork.Articular_SArGo.sd);
-lineKVN("Gonial (°)", toFixedOrDash(Gonial_ArGoMe),
-  toFixedOrDash(DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean),
-  DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd);
-lineKVN("Jarabak (%)", toFixedOrDash(Jarabak_Ratio),
-  toFixedOrDash(DEFAULT_NORMS.bjork.Jarabak_Ratio.mean),
-  DEFAULT_NORMS.bjork.Jarabak_Ratio.sd);
-divider(4);
-
-// === Análisis extendido ===
-sectionTitle("Análisis extendido");
-lineKVN("IMPA (°)", toFixedOrDash(IMPA),
-  toFixedOrDash(DEFAULT_NORMS.extended.IMPA.mean),
-  DEFAULT_NORMS.extended.IMPA.sd);
-lineKVN("Wits (mm)", toFixedOrDash(Wits),
-  toFixedOrDash(DEFAULT_NORMS.extended.Wits.mean),
-  DEFAULT_NORMS.extended.Wits.sd);
-lineKVN("Ocl–SN (°)", toFixedOrDash(Ocl_SN),
-  toFixedOrDash(DEFAULT_NORMS.extended.Ocl_SN.mean),
-  DEFAULT_NORMS.extended.Ocl_SN.sd);
-lineKVN("Eje facial (°)", toFixedOrDash(Facial_Angle),
-  toFixedOrDash(DEFAULT_NORMS.extended.Facial_Angle.mean),
-  DEFAULT_NORMS.extended.Facial_Angle.sd);
-lineKVN("U1–SN (°)", toFixedOrDash(U1_SN),
-  toFixedOrDash(DEFAULT_NORMS.extended.U1_SN.mean),
-  DEFAULT_NORMS.extended.U1_SN.sd);
-divider(5);
-  // === Resumen clínico (justificado manual) ===
-  sectionTitle("Resumen clínico");
+  const patientRows = [
+    ["Nombre", pNombre || "—"],
+    ["Edad", pEdad ? `${pEdad} años` : "—"],
+    ["Sexo", pSexo || "—"],
+    ["Doctor", pDoctor || "—"],
+    ["Fecha", pFecha || todayISO()],
+    ["Escala", mmPerPx ? `${mmPerPx.toFixed(4)} mm/px` : "Sin calibrar"],
+  ];
   pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(8.5);
-  pdf.setTextColor(60);
-
-  const maxWidth = 90;
-  const wrapLines = pdf.splitTextToSize(resumenFinal, maxWidth);
-  let yPos = y + 2;
-
-  wrapLines.forEach((line) => {
-    if (yPos > pageHeight - 15) {
-      pdf.addPage();
-      yPos = 20;
-    }
-    pdf.text(line, x0, yPos);
-    yPos += 4;
+  pdf.setFontSize(7.8);
+  patientRows.forEach(([label, value]) => {
+    pdf.setTextColor(90);
+    pdf.text(label, x0, y);
+    pdf.setTextColor(25);
+    const valueLines = pdf.splitTextToSize(String(value), Math.max(30, pageWidth - x0 - margin - 24)) as string[];
+    pdf.text(valueLines, pageWidth - margin, y, { align: "right" });
+    y += Math.max(4, valueLines.length * 3.4);
   });
 
-  // === Pie de página ===
+  y = imgY + renderHeight + 8;
+  if (y + 20 > contentBottom) y = addPage();
+  x0 = margin;
+
+  const drawMeasureHeader = () => {
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8);
+    pdf.setTextColor(80);
+    pdf.text("Medida", margin, y);
+    pdf.text("Valor", margin + contentWidth * 0.42, y, { align: "right" });
+    pdf.text("Norma", margin + contentWidth * 0.57, y, { align: "right" });
+    pdf.text("Unid", margin + contentWidth * 0.66, y);
+    pdf.text("z", margin + contentWidth * 0.76, y, { align: "right" });
+    pdf.text("Interpretación", margin + contentWidth * 0.82, y);
+    pdf.setDrawColor(180);
+    pdf.line(margin, y + 1.5, pageWidth - margin, y + 1.5);
+    y += 5;
+  };
+
+  sectionTitle("MEDIDAS CEFALOMÉTRICAS", margin);
+  drawMeasureHeader();
+  const rows = buildMeasuresRows();
+  rows.forEach((row) => {
+    const isSection = row.u === "" && row.v === "" && row.z === "" && row.i === "";
+    y = ensureSpace(y, isSection ? 6 : 4.2);
+    if (isSection) {
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8);
+      pdf.setTextColor(59, 139, 115);
+      pdf.text(row.k, margin, y);
+      y += 4.5;
+      return;
+    }
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.4);
+    pdf.setTextColor(40);
+    pdf.text(row.k, margin, y);
+    pdf.text(row.v, margin + contentWidth * 0.42, y, { align: "right" });
+    pdf.setTextColor(14, 116, 144);
+    pdf.text(row.norm || "—", margin + contentWidth * 0.57, y, { align: "right" });
+    pdf.setTextColor(80);
+    pdf.text(row.u, margin + contentWidth * 0.66, y);
+    pdf.text(row.z, margin + contentWidth * 0.76, y, { align: "right" });
+    const interp = pdf.splitTextToSize(row.i || "—", contentWidth * 0.18) as string[];
+    pdf.text(interp, margin + contentWidth * 0.82, y);
+    y += Math.max(4.2, interp.length * 3.2);
+  });
+
+  y = ensureSpace(y + 3, 25);
+  sectionTitle("RESUMEN CLÍNICO", margin);
   pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(9);
-  pdf.setTextColor(120);
-  pdf.text(
-    `Realizado en cefalometria.odontover.com · Cortesía del Dr. Fernando Juárez · ${new Date().toLocaleDateString("es-MX")}`,
-    pageWidth / 2,
-    pageHeight - 5,
-    { align: "center" }
-  );
+  pdf.setFontSize(8.4);
+  pdf.setTextColor(60);
+  const summaryLines = pdf.splitTextToSize(resumenFinal, contentWidth) as string[];
+  summaryLines.forEach((line) => {
+    y = ensureSpace(y, 4);
+    pdf.text(line, margin, y);
+    y += 4;
+  });
+
+  const totalPages = pdf.getNumberOfPages();
+  for (let page = 1; page <= totalPages; page++) {
+    pdf.setPage(page);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(120);
+    pdf.text(footerText, pageWidth / 2, pageHeight - 5, { align: "center" });
+    pdf.text(`${page}/${totalPages}`, pageWidth - margin, pageHeight - 5, { align: "right" });
+  }
 
   pdf.save(`Cefalometria_${pNombre || "paciente"}.pdf`);
 }
@@ -1228,35 +1361,53 @@ const push = (k:string, val:number, u:string, m:number, sd:number, zEnabled=true
     norm: toFixedOrDash(m),
     u,
     z: zEnabled ? toFixedOrDash(zScore(val, m, sd)) : "—",
-    i: interpWithTolerance(val, m, u, zEnabled)
+    i: clinicalInterpretationForMeasure(k, val, u, zEnabled)
   });
-    if (useSteiner){ rows.push({k:"— Steiner —",v:"",u:"",z:"",i:""});
+const pushThird = (k:string, mmValue:number, percentValue:number) =>
+  rows.push({
+    k,
+    v: toFixedOrDash(percentValue),
+    norm: `${FACIAL_THIRD_TARGET_PERCENT.toFixed(2)}%`,
+    u: "%",
+    z: FACIAL_THIRD_TOLERANCE_LABEL,
+    i: Number.isNaN(percentValue) ? "—" : facialThirdInterpretation(percentValue)
+  });
+    if (useSteiner){ rows.push({k:"— Steiner —",v:"",norm:"",u:"",z:"",i:""});
       push("SNA", SNA, "°", DEFAULT_NORMS.steiner.SNA.mean, DEFAULT_NORMS.steiner.SNA.sd);
       push("SNB", SNB, "°", DEFAULT_NORMS.steiner.SNB.mean, DEFAULT_NORMS.steiner.SNB.sd);
       push("ANB", ANB, "°", DEFAULT_NORMS.steiner.ANB.mean, DEFAULT_NORMS.steiner.ANB.sd);
       push("SN–GoGn", SN_GoGn, "°", DEFAULT_NORMS.steiner.SN_GoGn.mean, DEFAULT_NORMS.steiner.SN_GoGn.sd);
       push("U1–NA (°)", U1_NA_deg, "°", DEFAULT_NORMS.steiner.U1_NA_deg.mean, DEFAULT_NORMS.steiner.U1_NA_deg.sd);
-      push("U1–NA (mm)", U1_NA_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd, Boolean(mmPerPx));
+      push("U1–NA (mm)", U1_NA_mm, "mm", DEFAULT_NORMS.steiner.U1_NA_mm.mean, DEFAULT_NORMS.steiner.U1_NA_mm.sd, Boolean(mmPerPx));
       push("L1–NB (°)", L1_NB_deg, "°", DEFAULT_NORMS.steiner.L1_NB_deg.mean, DEFAULT_NORMS.steiner.L1_NB_deg.sd);
-      push("L1–NB (mm)", L1_NB_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd, Boolean(mmPerPx));
+      push("L1–NB (mm)", L1_NB_mm, "mm", DEFAULT_NORMS.steiner.L1_NB_mm.mean, DEFAULT_NORMS.steiner.L1_NB_mm.sd, Boolean(mmPerPx));
       push("Interincisal", Interincisal, "°", DEFAULT_NORMS.steiner.Interincisal.mean, DEFAULT_NORMS.steiner.Interincisal.sd);
-      push("Pg–NB (±)", Pg_NB_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd, Boolean(mmPerPx));
+      push("Pg–NB (±)", Pg_NB_mm, "mm", DEFAULT_NORMS.steiner.Pg_NB_mm.mean, DEFAULT_NORMS.steiner.Pg_NB_mm.sd, Boolean(mmPerPx));
     }
-    if (useBjork){ rows.push({k:"— Björk–Jarabak —",v:"",u:"",z:"",i:""});
+    if (useBjork){ rows.push({k:"— Björk–Jarabak —",v:"",norm:"",u:"",z:"",i:""});
       push("Silla (N–S–Ar)", Saddle_NSAr, "°", DEFAULT_NORMS.bjork.Saddle_NSAr.mean, DEFAULT_NORMS.bjork.Saddle_NSAr.sd);
       push("Articular (S–Ar–Go)", Articular_SArGo, "°", DEFAULT_NORMS.bjork.Articular_SArGo.mean, DEFAULT_NORMS.bjork.Articular_SArGo.sd);
       push("Gonial (Ar–Go–Me)", Gonial_ArGoMe, "°", DEFAULT_NORMS.bjork.Gonial_ArGoMe.mean, DEFAULT_NORMS.bjork.Gonial_ArGoMe.sd);
       push("Suma Björk", Sum_Bjork, "°", DEFAULT_NORMS.bjork.Sum_Bjork.mean, DEFAULT_NORMS.bjork.Sum_Bjork.sd);
       push("Jarabak % (S–Go/N–Me)", Jarabak_Ratio, "%", DEFAULT_NORMS.bjork.Jarabak_Ratio.mean, DEFAULT_NORMS.bjork.Jarabak_Ratio.sd);
     }
-    rows.push({k:"— Odontover Extended —",v:"",u:"",z:"",i:""});
+    if (useExtended) {
+    rows.push({k:"— Otras medidas —",v:"",norm:"",u:"",z:"",i:""});
 push("IMPA (°)", IMPA, "°", DEFAULT_NORMS.extended.IMPA.mean, DEFAULT_NORMS.extended.IMPA.sd);
 push("Wits (mm)", Wits, "mm", DEFAULT_NORMS.extended.Wits.mean, DEFAULT_NORMS.extended.Wits.sd);
+push("Beta Angle (°)", Beta_Angle, "°", DEFAULT_NORMS.extended.Beta_Angle.mean, DEFAULT_NORMS.extended.Beta_Angle.sd);
 push("Plano Oclusal – SN (°)", Ocl_SN, "°", DEFAULT_NORMS.extended.Ocl_SN.mean, DEFAULT_NORMS.extended.Ocl_SN.sd);
+push("FMA (°)", FMA, "°", 26, 4);
+push("Overjet estimado (mm)", incisalOverlap.overjet, "mm", 2.5, 1, Boolean(mmPerPx));
+push("Overbite estimado (mm)", incisalOverlap.overbite, "mm", 3, 1, Boolean(mmPerPx));
 push("Eje Facial (°)", Facial_Angle, "°", DEFAULT_NORMS.extended.Facial_Angle.mean, DEFAULT_NORMS.extended.Facial_Angle.sd);
 push("U1–SN (°)", U1_SN, "°", DEFAULT_NORMS.extended.U1_SN.mean, DEFAULT_NORMS.extended.U1_SN.sd);
-    rows.push({k:"— Tejidos blandos —",v:"",u:"",z:"",i:""});
-    push("Labio inf – E-line (±)", ELine_Li_mm, mmPerPx?"mm":"px", DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd, Boolean(mmPerPx));
+    }
+    rows.push({k:"— Tejidos blandos —",v:"",norm:"",u:"",z:"",i:""});
+    push("Labio inf – E-line (±)", ELine_Li_mm, "mm", DEFAULT_NORMS.soft.ELine_Li_mm.mean, DEFAULT_NORMS.soft.ELine_Li_mm.sd, Boolean(mmPerPx));
+    pushThird("Tercio superior (Tr–G)", facialThirds.upper, facialThirds.upperPercent);
+    pushThird("Tercio medio (G–Sn)", facialThirds.middle, facialThirds.middlePercent);
+    pushThird("Tercio inferior (Sn–Me')", facialThirds.lower, facialThirds.lowerPercent);
     return rows;
   }
 
@@ -1359,107 +1510,134 @@ async function exportTablePNG() {
 
 async function exportTablePDF() {
   const rows = buildMeasuresRows();
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 12;
+  const contentWidth = pageWidth - margin * 2;
+  const bottom = pageHeight - 14;
+  let y = 20;
+  let tableStarted = false;
 
-  // 🔹 Construcción de las filas HTML (con columna "Norma")
-  const htmlRows = rows
-    .map((r) =>
-      r.u === "" && r.v === "" && r.z === "" && r.i === ""
-        ? `<tr><td colspan="6" style="padding-top:6px;color:#60a5fa;font-weight:600">${r.k}</td></tr>`
-        : `<tr>
-             <td>${r.k}</td>
-             <td style="text-align:right">${r.v}</td>
-             <td style="text-align:right;color:#60a5fa">${r.norm || "—"}</td>
-             <td>${r.u}</td>
-             <td>${r.z}</td>
-             <td>${r.i}</td>
-           </tr>`
-    )
-    .join("");
+  const drawHeader = () => {
+    pdf.setFillColor(255, 255, 255);
+    pdf.rect(0, 0, pageWidth, 16, "F");
+    pdf.setDrawColor(217, 229, 234);
+    pdf.line(0, 16, pageWidth, 16);
+    pdf.setFillColor(14, 116, 144);
+    pdf.roundedRect(margin, 4, 9, 9, 2, 2, "F");
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(13);
+    pdf.setTextColor(16, 37, 51);
+    pdf.text("Tabla cefalométrica", margin + 13, 9);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(59, 139, 115);
+    pdf.text("Mediciones cefalométricas", margin + 13, 13);
+    pdf.setTextColor(71, 85, 105);
+    pdf.text(`${pFecha || todayISO()}`, pageWidth - margin, 10, { align: "right" });
+  };
+  const drawColumns = (allowPageBreak = true) => {
+    if (allowPageBreak && y + 8 > bottom) {
+      addPage(false);
+    }
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8);
+    pdf.setTextColor(80);
+    pdf.text("Medida", margin, y);
+    pdf.text("Valor", margin + contentWidth * 0.43, y, { align: "right" });
+    pdf.text("Norma", margin + contentWidth * 0.58, y, { align: "right" });
+    pdf.text("Unid", margin + contentWidth * 0.67, y);
+    pdf.text("z", margin + contentWidth * 0.77, y, { align: "right" });
+    pdf.text("Interpretación", margin + contentWidth * 0.83, y);
+    pdf.setDrawColor(190);
+    pdf.line(margin, y + 1.5, pageWidth - margin, y + 1.5);
+    y += 5;
+  };
+  const addPage = (withColumns = tableStarted) => {
+    pdf.addPage();
+    drawHeader();
+    y = 22;
+    if (withColumns) drawColumns(false);
+  };
+  const ensure = (needed: number) => {
+    if (y + needed > bottom) addPage();
+  };
 
-  // 🔹 HTML completo del PDF
-  const html = `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8"/>
-<title>Tabla de medidas</title>
-<style>
-  @page { size: A4; margin: 16mm; }
-  body {
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
-    color: #0b1220;
-    margin: 0;
-  }
-  h1 {
-    font-size: 20px;
-    margin: 0 0 6px 0;
-  }
-  .sub {
-    color: #2563eb;
-    font-size: 12px;
-    margin-bottom: 10px;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  th, td {
-    padding: 6px 8px;
-    border-bottom: 1px solid #e5e7eb;
-    font-size: 12px;
-  }
-  thead th {
-    color: #334155;
-    text-align: left;
-  }
-</style>
-</head>
-<body>
-  <h1>Tabla de medidas (con normas de referencia)</h1>
-  <div class="sub">by @dr.juarez</div>
-  <div style="font-size:12px;color:#334155;margin-bottom:8px">
-    ${pNombre || "—"} · ${pEdad ? pEdad + " años" : "—"} · ${pSexo || "—"} · ${
-    pFecha || "—"
-  } · Dr: ${pDoctor || "—"}
-  </div>
+  drawHeader();
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(8);
+  pdf.setTextColor(14, 116, 144);
+  pdf.text("Datos del paciente", margin, y);
+  y += 5;
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(8);
+  pdf.setTextColor(71, 85, 105);
+  const patientLines = [
+    `Paciente: ${pNombre || "Sin nombre"} · Edad: ${pEdad ? pEdad + " años" : "No registrada"} · Sexo: ${pSexo || "—"}`,
+    `Doctor: ${pDoctor || "—"} · Fecha: ${pFecha || todayISO()} · Escala: ${mmPerPx ? `${mmPerPx.toFixed(4)} mm/px` : "Sin calibrar"}`,
+    `Mediciones exportadas: ${rows.filter((row) => !(row.u === "" && row.v === "" && row.z === "" && row.i === "")).length}`,
+  ];
+  patientLines.forEach((line) => {
+    const wrapped = pdf.splitTextToSize(line, contentWidth) as string[];
+    ensure(wrapped.length * 3.5 + 1);
+    pdf.text(wrapped, margin, y);
+    y += wrapped.length * 3.5 + 1;
+  });
+  y += 3;
+  drawColumns();
+  tableStarted = true;
 
-  <table>
-    <thead>
-      <tr>
-        <th>Medida</th>
-        <th style="text-align:right">Valor</th>
-        <th style="text-align:right;color:#60a5fa">Norma</th>
-        <th>Unid</th>
-        <th>z</th>
-        <th>Interpretación</th>
-      </tr>
-    </thead>
-    <tbody>${htmlRows}</tbody>
-  </table>
+  rows.forEach((row) => {
+    const isSection = row.u === "" && row.v === "" && row.z === "" && row.i === "";
+    if (isSection) {
+      ensure(7);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(8);
+      pdf.setTextColor(59, 139, 115);
+      pdf.text(row.k, margin, y);
+      y += 5;
+      return;
+    }
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.5);
+    const wrapped = pdf.splitTextToSize(row.i || "—", contentWidth * 0.17) as string[];
+    const rowHeight = Math.max(4.2, wrapped.length * 3.2);
+    ensure(rowHeight);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(40);
+    pdf.text(row.k, margin, y);
+    pdf.text(row.v, margin + contentWidth * 0.43, y, { align: "right" });
+    pdf.setTextColor(14, 116, 144);
+    pdf.text(row.norm || "—", margin + contentWidth * 0.58, y, { align: "right" });
+    pdf.setTextColor(80);
+    pdf.text(row.u, margin + contentWidth * 0.67, y);
+    pdf.text(row.z, margin + contentWidth * 0.77, y, { align: "right" });
+    pdf.text(wrapped, margin + contentWidth * 0.83, y);
+    y += rowHeight;
+  });
 
-  <div style="margin-top:24px;font-size:11px;color:#475569;text-align:center">
-    Cefalometría — <b>cefalometria.odontover.com</b><br/>
-    ${new Date().toLocaleDateString("es-MX")} · 
-    ${window.location.hostname}
-  </div>
+  const totalPages = pdf.getNumberOfPages();
+  for (let page = 1; page <= totalPages; page++) {
+    pdf.setPage(page);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(8);
+    pdf.setTextColor(120);
+    pdf.text("cefalometria.odontover.com", margin, pageHeight - 6);
+    pdf.text(`${page}/${totalPages}`, pageWidth - margin, pageHeight - 6, { align: "right" });
+  }
 
-  <script>
-    // Autoimprimir o guardar como PDF
-    window.onload = () => {
-      setTimeout(() => window.print(), 500);
-    };
-  </script>
-</body>
-</html>`;
-
-  // 🔹 Crear y abrir el archivo en una nueva pestaña
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, "_blank");
-  if (!w) setManualLink(url, "cefalo_tabla.pdf.html");
+  pdf.save(`Cefalometria_tabla_${pNombre || "paciente"}.pdf`);
 }
 
 function interpretacionExtendida() {
   const parts: string[] = [];
+
+  const thirdLine = (name: string, percent: number) => {
+    if (Number.isNaN(percent)) return `${name}: indeterminado`;
+    return `${name}: ${facialThirdInterpretation(percent)}`;
+  };
 
   // IMPA (ángulo del incisivo inferior con el plano mandibular)
   const impaState = interpWithTolerance(IMPA, DEFAULT_NORMS.extended.IMPA.mean, "°");
@@ -1505,6 +1683,39 @@ function interpretacionExtendida() {
     parts.push("Los incisivos superiores se encuentran proinclinados respecto al plano SN.");
   else if (u1snState === "normal")
     parts.push("La inclinación de los incisivos superiores respecto al plano SN es adecuada.");
+
+const fmaState = interpWithTolerance(FMA, 26, "°");
+  if (fmaState === "menor")
+    parts.push("El FMA sugiere una tendencia hipodivergente.");
+  else if (fmaState === "mayor")
+    parts.push("El FMA sugiere una tendencia hiperdivergente.");
+  else if (fmaState === "normal")
+    parts.push("El FMA se mantiene dentro del rango esperado para un patrón equilibrado.");
+
+  const betaState = interpWithTolerance(Beta_Angle, DEFAULT_NORMS.extended.Beta_Angle.mean, "°");
+  if (betaState === "menor")
+    parts.push("El Beta Angle sugiere tendencia Clase III.");
+  else if (betaState === "mayor")
+    parts.push("El Beta Angle sugiere tendencia Clase II.");
+  else if (betaState === "normal")
+    parts.push("El Beta Angle se mantiene dentro del rango esperado para una relación esquelética equilibrada.");
+
+  if (!Number.isNaN(incisalOverlap.overjet) && !Number.isNaN(incisalOverlap.overbite)) {
+    parts.push(
+      `La sobremordida horizontal estimada es ${toFixedOrDash(incisalOverlap.overjet)} mm y la sobremordida vertical estimada es ${toFixedOrDash(incisalOverlap.overbite)} mm.`
+    );
+  }
+
+  parts.push(
+    `Tercios faciales: ${thirdLine("superior", facialThirds.upperPercent)}, ${thirdLine("medio", facialThirds.middlePercent)} y ${thirdLine("inferior", facialThirds.lowerPercent)}.`
+  );
+
+  if (!Number.isNaN(ELine_Li_mm) && !Number.isNaN(facialThirds.upperPercent)) {
+    const lipsState = interpWithTolerance(ELine_Li_mm, DEFAULT_NORMS.soft.ELine_Li_mm.mean, "mm", true);
+    parts.push(
+      `Los tejidos blandos muestran E-line del labio inferior en ${toFixedOrDash(ELine_Li_mm)} mm (${lipsState}).`
+    );
+  }
 
   return parts.join(" ");
 }
@@ -1567,8 +1778,8 @@ function interpretacionExtendida() {
             <label className="inline-flex items-center gap-2"><input type="checkbox" checked={useSteiner} onChange={e=>setUseSteiner(e.target.checked)} /> Steiner</label>
             <label className="inline-flex items-center gap-2"><input type="checkbox" checked={useBjork} onChange={e=>setUseBjork(e.target.checked)} /> Björk–Jarabak</label>
             <label className="inline-flex items-center gap-2"><input type="checkbox" checked={showOverlay} onChange={e=>setShowOverlay(e.target.checked)} /> Mostrar overlay</label>
-          <label className="inline-flex items-center gap-2">
-  <input type="checkbox" checked={useExtended} onChange={e=>setUseExtended(e.target.checked)} /> Análisis Extendido
+            <label className="inline-flex items-center gap-2">
+  <input type="checkbox" checked={useExtended} onChange={e=>setUseExtended(e.target.checked)} /> Otras medidas
 </label>
           </div>
         </section>
@@ -1618,11 +1829,11 @@ function interpretacionExtendida() {
                   <RowZInt name="ANB" value={ANB} units="°" norm={DEFAULT_NORMS.steiner.ANB} />
                   <RowZInt name="SN–GoGn" value={SN_GoGn} units="°" norm={DEFAULT_NORMS.steiner.SN_GoGn} />
                   <RowZInt name="U1–NA (°)" value={U1_NA_deg} units="°" norm={DEFAULT_NORMS.steiner.U1_NA_deg} />
-                  <RowZInt name="U1–NA (mm)" value={U1_NA_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.U1_NA_mm} zEnabled={Boolean(mmPerPx)} />
+                  <RowZInt name="U1–NA (mm)" value={U1_NA_mm} units="mm" norm={DEFAULT_NORMS.steiner.U1_NA_mm} zEnabled={Boolean(mmPerPx)} />
                   <RowZInt name="L1–NB (°)" value={L1_NB_deg} units="°" norm={DEFAULT_NORMS.steiner.L1_NB_deg} />
-                  <RowZInt name="L1–NB (mm)" value={L1_NB_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.L1_NB_mm} zEnabled={Boolean(mmPerPx)} />
+                  <RowZInt name="L1–NB (mm)" value={L1_NB_mm} units="mm" norm={DEFAULT_NORMS.steiner.L1_NB_mm} zEnabled={Boolean(mmPerPx)} />
                   <RowZInt name="Interincisal" value={Interincisal} units="°" norm={DEFAULT_NORMS.steiner.Interincisal} />
-                  <RowZInt name="Pg–NB (±)" value={Pg_NB_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.steiner.Pg_NB_mm} zEnabled={Boolean(mmPerPx)} />
+                  <RowZInt name="Pg–NB (±)" value={Pg_NB_mm} units="mm" norm={DEFAULT_NORMS.steiner.Pg_NB_mm} zEnabled={Boolean(mmPerPx)} />
                 </>)}
                 {useBjork && (<>
                   <tr><td colSpan={5} className="pt-2 text-sky-300">— Björk–Jarabak —</td></tr>
@@ -1632,24 +1843,43 @@ function interpretacionExtendida() {
                   <RowZInt name="Suma Björk" value={Sum_Bjork} units="°" norm={DEFAULT_NORMS.bjork.Sum_Bjork} />
                   <RowZInt name="Jarabak % (S–Go/N–Me)" value={Jarabak_Ratio} units="%" norm={DEFAULT_NORMS.bjork.Jarabak_Ratio} />
                 </>)}
-                <tr><td colSpan={5} className="pt-2 text-sky-300">— Análisis Extendido —</td></tr>
+                {useExtended && (<>
+                <tr><td colSpan={5} className="pt-2 text-sky-300">— Otras medidas —</td></tr>
 <RowZInt name="IMPA (°)" value={IMPA} units="°" norm={DEFAULT_NORMS.extended.IMPA} />
 <RowZInt name="Wits (mm)" value={Wits} units="mm" norm={DEFAULT_NORMS.extended.Wits} />
+<RowZInt name="Beta Angle (°)" value={Beta_Angle} units="°" norm={DEFAULT_NORMS.extended.Beta_Angle} />
 <RowZInt name="Plano Oclusal – SN (°)" value={Ocl_SN} units="°" norm={DEFAULT_NORMS.extended.Ocl_SN} />
+<RowZInt name="FMA (°)" value={FMA} units="°" norm={{ mean: 26, sd: 4 }} />
+<RowZInt name="Overjet estimado (mm)" value={incisalOverlap.overjet} units="mm" norm={{ mean: 2.5, sd: 1 }} zEnabled={Boolean(mmPerPx)} />
+<RowZInt name="Overbite estimado (mm)" value={incisalOverlap.overbite} units="mm" norm={{ mean: 3, sd: 1 }} zEnabled={Boolean(mmPerPx)} />
 <RowZInt name="Eje Facial (°)" value={Facial_Angle} units="°" norm={DEFAULT_NORMS.extended.Facial_Angle} />
 <RowZInt name="U1–SN (°)" value={U1_SN} units="°" norm={DEFAULT_NORMS.extended.U1_SN} />
+                </>)}
                 <tr><td colSpan={5} className="pt-2 text-sky-300">— Tejidos blandos —</td></tr>
-                <RowZInt name="Labio inf – E-line (±)" value={ELine_Li_mm} units={mmPerPx?"mm":"px"} norm={DEFAULT_NORMS.soft.ELine_Li_mm} zEnabled={Boolean(mmPerPx)} />
+                <RowZInt name="Labio inf – E-line (±)" value={ELine_Li_mm} units="mm" norm={DEFAULT_NORMS.soft.ELine_Li_mm} zEnabled={Boolean(mmPerPx)} />
+                <RowThird name="Tercio superior (Tr–G)" mmValue={facialThirds.upper} percentValue={facialThirds.upperPercent} />
+                <RowThird name="Tercio medio (G–Sn)" mmValue={facialThirds.middle} percentValue={facialThirds.middlePercent} />
+                <RowThird name="Tercio inferior (Sn–Me')" mmValue={facialThirds.lower} percentValue={facialThirds.lowerPercent} />
               </tbody>
             </table>
           </div>
-          <div className="mt-3 flex gap-2 flex-wrap">
-            <button onClick={exportCSV} className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm">Exportar CSV</button>
-            <button onClick={exportSheetPNG} className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm">Exportar Trazo (PNG)</button>
-            <button onClick={exportSheetPDF} className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-sm">Exportar PDF (A4)</button>
-            <button onClick={exportTablePNG} className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm">Tabla (PNG)</button>
-            <button onClick={exportTablePDF} className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm">Tabla (PDF)</button>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              onClick={exportSheetPDF}
+              className="px-4 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-sm font-semibold text-white shadow-sm shadow-cyan-950/30"
+            >
+              Exportar PDF
+            </button>
+            <button
+              onClick={exportTablePDF}
+              className="px-4 py-2 rounded-md border border-cyan-200/70 bg-white text-sm font-semibold text-slate-900 hover:bg-cyan-50"
+            >
+              Exportar tabla
+            </button>
           </div>
+          <p className="mt-2 text-xs leading-5 text-slate-400">
+            PDF incluye trazo sobre radiografía, tabla de valores y resumen clínico. Tabla exporta solo las mediciones para revisión o captura manual.
+          </p>
           {downloadHint && (
             <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-300">
               <div className="mb-1">Compatibilidad: si una descarga o ventana fue bloqueada, usa este enlace manual:</div>
@@ -1868,7 +2098,7 @@ function RowZInt({
       : Math.abs(delta!) <= tol * 2
       ? "text-amber-400"
       : "text-rose-400";
-  const interp = interpWithTolerance(value, norm.mean, units, zEnabled);
+  const interp = clinicalInterpretationForMeasure(name, value, units, zEnabled);
 
   return (
     <tr className="border-t border-slate-800">
@@ -1884,6 +2114,26 @@ function RowZInt({
         {Number.isNaN(zz) ? "—" : `${zz >= 0 ? "+" : ""}${zz.toFixed(2)}`}
       </td>
       <td className="py-1">{interp}</td>
+    </tr>
+  );
+}
+
+function RowThird({ name, mmValue, percentValue }: { name: string; mmValue: number; percentValue: number }) {
+  const ok = !Number.isNaN(percentValue);
+  const interp = facialThirdInterpretation(percentValue);
+  const color = !ok ? "text-slate-500" : interp === "normal" ? "text-emerald-400" : "text-amber-400";
+  return (
+    <tr className="border-t border-slate-800">
+      <td className="py-1 pr-4 text-slate-300">{name}</td>
+      <td className={`py-1 pr-4 text-right ${ok ? "text-slate-100" : "text-slate-500"}`}>
+        {toFixedOrDash(percentValue)}
+      </td>
+      <td className="py-1 text-sky-300 text-right pr-4">
+        {FACIAL_THIRD_TARGET_PERCENT.toFixed(2)}%
+      </td>
+      <td className="py-1">%</td>
+      <td className="py-1 text-slate-300">{FACIAL_THIRD_TOLERANCE_LABEL}</td>
+      <td className={`py-1 ${color}`}>{ok ? interp : "—"}</td>
     </tr>
   );
 }
