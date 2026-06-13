@@ -385,7 +385,7 @@ useEffect(() => {
 
   function onCanvasClick(e: React.MouseEvent) {
     if (!imgRef.current) return; const rect = (e.target as HTMLElement).getBoundingClientRect(); const x = e.clientX - rect.left, y = e.clientY - rect.top; const pt = {x,y};
-    if (calibMode) { const next = [...calibClicks, pt].slice(-2); setCalibClicks(next); if (next.length===2) { const px = distance(next[0], next[1]); if (mmKnown>0 && px>0){ setMmPerPx(mmKnown/px); setCalibMode(false);} } return; }
+    if (calibMode) { const next = [...calibClicks, pt].slice(-2); setCalibClicks(next); if (next.length===2) { const px = distance(toImageSpace(next[0]), toImageSpace(next[1])); if (mmKnown>0 && px>0){ setMmPerPx(mmKnown/px); setCalibMode(false);} } return; }
     if (placingMode && activeKey) {
       const temp = { ...points, [activeKey]: pt } as Partial<Record<LandmarkKey, Pt>>;
       setPoints(temp);
@@ -408,7 +408,14 @@ useEffect(() => {
   function onUp(){ window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); dragInfo.current=null; }
 
   const has = (k: LandmarkKey) => Boolean(points[k]);
-  const mm = (px: number) => (mmPerPx ? px * mmPerPx : NaN);
+  const toImageSpace = (p: Pt) => {
+    const sx = fixedScale?.sx ?? 1;
+    const sy = fixedScale?.sy ?? 1;
+    return { x: p.x * sx, y: p.y * sy };
+  };
+  const pointDistanceMm = (a: Pt, b: Pt) => (mmPerPx ? distance(toImageSpace(a), toImageSpace(b)) * mmPerPx : NaN);
+  const signedPointLineDistanceMm = (p: Pt, a: Pt, b: Pt) =>
+    mmPerPx ? pointLineDistanceSigned(toImageSpace(p), toImageSpace(a), toImageSpace(b)) * mmPerPx : NaN;
 
   // Steiner
   const SNA = useMemo(() => (has("S")&&has("N")&&has("A"))? angleBetween(points.S!, points.N!, points.A!) : NaN, [points]);
@@ -423,24 +430,24 @@ useEffect(() => {
     : NaN,
   [points]
 );
-  const U1_NA_mm  = useMemo(() => (has("U1T")&&has("N")&&has("A"))? Math.abs(mm(pointLineDistanceSigned(points.U1T!, points.N!, points.A!))) : NaN, [points, mmPerPx]);
+  const U1_NA_mm  = useMemo(() => (has("U1T")&&has("N")&&has("A"))? Math.abs(signedPointLineDistanceMm(points.U1T!, points.N!, points.A!)) : NaN, [points, mmPerPx, fixedScale]);
   const L1_NB_deg = useMemo(
   () => (L1_axis && has("N") && has("B"))
     ? acuteAngleBetweenLines(L1_axis[0], L1_axis[1], points.N!, points.B!)
     : NaN,
   [points]
 );
-  const L1_NB_mm  = useMemo(() => (has("L1T")&&has("N")&&has("B"))? Math.abs(mm(pointLineDistanceSigned(points.L1T!, points.N!, points.B!))) : NaN, [points, mmPerPx]);
+  const L1_NB_mm  = useMemo(() => (has("L1T")&&has("N")&&has("B"))? Math.abs(signedPointLineDistanceMm(points.L1T!, points.N!, points.B!)) : NaN, [points, mmPerPx, fixedScale]);
   const Interincisal = useMemo(() => (U1_axis && L1_axis)? angleBetweenLines(U1_axis[0], U1_axis[1], L1_axis[0], L1_axis[1]) : NaN, [points]);
-  const Pg_NB_mm = useMemo(() => (has("Pg")&&has("N")&&has("B"))? mm(pointLineDistanceSigned(points.Pg!, points.N!, points.B!)) : NaN, [points, mmPerPx]);
+  const Pg_NB_mm = useMemo(() => (has("Pg")&&has("N")&&has("B"))? signedPointLineDistanceMm(points.Pg!, points.N!, points.B!) : NaN, [points, mmPerPx, fixedScale]);
   // Björk–Jarabak
   const Saddle_NSAr = useMemo(() => (has("N")&&has("S")&&has("Ar"))? angleBetween(points.N!, points.S!, points.Ar!) : NaN, [points]);
   const Articular_SArGo = useMemo(() => (has("S")&&has("Ar")&&has("Go"))? angleBetween(points.S!, points.Ar!, points.Go!) : NaN, [points]);
   const Gonial_ArGoMe = useMemo(() => (has("Ar")&&has("Go")&&has("Me"))? angleBetween(points.Ar!, points.Go!, points.Me!) : NaN, [points]);
   const Sum_Bjork = useMemo(() => (Number.isNaN(Saddle_NSAr)||Number.isNaN(Articular_SArGo)||Number.isNaN(Gonial_ArGoMe))? NaN : Saddle_NSAr+Articular_SArGo+Gonial_ArGoMe, [Saddle_NSAr,Articular_SArGo,Gonial_ArGoMe]);
-  const Jarabak_Ratio = useMemo(() => (has("S")&&has("Go")&&has("N")&&has("Me"))? (distance(points.S!, points.Go!) / distance(points.N!, points.Me!)) * 100 : NaN, [points]);
+  const Jarabak_Ratio = useMemo(() => (has("S")&&has("Go")&&has("N")&&has("Me"))? (pointDistanceMm(points.S!, points.Go!) / pointDistanceMm(points.N!, points.Me!)) * 100 : NaN, [points, mmPerPx, fixedScale]);
   // Ricketts – línea estética (E-line)  (signo: + delante / - detrás)
-  const ELine_Li_mm = useMemo(() => (has("Li")&&has("Prn")&&has("PgS"))? mm(pointLineDistanceSigned(points.Li!, points.Prn!, points.PgS!)) : NaN, [points, mmPerPx]);
+  const ELine_Li_mm = useMemo(() => (has("Li")&&has("Prn")&&has("PgS"))? signedPointLineDistanceMm(points.Li!, points.Prn!, points.PgS!) : NaN, [points, mmPerPx, fixedScale]);
 // === Odontover Extended ===
 const IMPA = useMemo(() =>
   (has("L1T") && has("L1A") && has("Go") && has("Gn"))
@@ -451,7 +458,7 @@ const IMPA = useMemo(() =>
 
 // === Wits appraisal — distancia entre proyecciones AO y BO sobre el plano oclusal ===
 const Wits = useMemo(() => {
-  if (!(has("A") && has("B") && has("Oc1") && has("Oc2"))) return NaN;
+  if (!(has("A") && has("B") && has("Oc1") && has("Oc2") && mmPerPx)) return NaN;
 
   // Proyección perpendicular de un punto (p) sobre una línea (a-b)
   const projectPointOntoLine = (p: Pt, a: Pt, b: Pt): Pt => {
@@ -464,12 +471,16 @@ const Wits = useMemo(() => {
   };
 
   // 1️⃣ Proyectar A y B sobre el plano oclusal
-  const AO = projectPointOntoLine(points.A!, points.Oc1!, points.Oc2!);
-  const BO = projectPointOntoLine(points.B!, points.Oc1!, points.Oc2!);
+  const A = toImageSpace(points.A!);
+  const B = toImageSpace(points.B!);
+  const Oc1 = toImageSpace(points.Oc1!);
+  const Oc2 = toImageSpace(points.Oc2!);
+  const AO = projectPointOntoLine(A, Oc1, Oc2);
+  const BO = projectPointOntoLine(B, Oc1, Oc2);
 
   // 2️⃣ Calcular el vector del plano oclusal (de Oc1 → Oc2)
-  const vx = points.Oc2!.x - points.Oc1!.x;
-  const vy = points.Oc2!.y - points.Oc1!.y;
+  const vx = Oc2.x - Oc1.x;
+  const vy = Oc2.y - Oc1.y;
   const vlen = Math.hypot(vx, vy);
   if (vlen === 0) return NaN;
 
@@ -486,7 +497,7 @@ const Wits = useMemo(() => {
   const distMm = mmPerPx ? distPx * mmPerPx : NaN;
 
   return sign * distMm;
-}, [points, mmPerPx]);
+}, [points, mmPerPx, fixedScale]);
 
 const Ocl_SN = useMemo(() => {
   const hasOcclusal = has("Oc1") && has("Oc2");
@@ -528,19 +539,23 @@ const incisalOverlap = useMemo(() => {
   if (!(has("U1T") && has("L1T") && has("Oc1") && has("Oc2") && mmPerPx)) {
     return { overjet: NaN, overbite: NaN };
   }
-  const dx = points.Oc2!.x - points.Oc1!.x;
-  const dy = points.Oc2!.y - points.Oc1!.y;
+  const oc1 = toImageSpace(points.Oc1!);
+  const oc2 = toImageSpace(points.Oc2!);
+  const u1 = toImageSpace(points.U1T!);
+  const l1 = toImageSpace(points.L1T!);
+  const dx = oc2.x - oc1.x;
+  const dy = oc2.y - oc1.y;
   const len = Math.hypot(dx, dy);
   if (len === 0) return { overjet: NaN, overbite: NaN };
   const ux = dx / len;
   const uy = dy / len;
-  const delta = { x: points.U1T!.x - points.L1T!.x, y: points.U1T!.y - points.L1T!.y };
+  const delta = { x: u1.x - l1.x, y: u1.y - l1.y };
   const overjetPx = Math.abs(delta.x * ux + delta.y * uy);
   const overbitePx = Math.abs(delta.x * -uy + delta.y * ux);
   return { overjet: overjetPx * mmPerPx, overbite: overbitePx * mmPerPx };
-}, [points, mmPerPx]);
+}, [points, mmPerPx, fixedScale]);
 const facialThirds = useMemo(() => {
-  const linearMm = (a?: Pt, b?: Pt) => (a && b && mmPerPx ? distance(a, b) * mmPerPx : NaN);
+  const linearMm = (a?: Pt, b?: Pt) => (a && b && mmPerPx ? distance(toImageSpace(a), toImageSpace(b)) * mmPerPx : NaN);
   const upper = linearMm(points.Tr, points.G);
   const middle = linearMm(points.G, points.Sn);
   const lower = linearMm(points.Sn, points.MeS);
@@ -554,7 +569,7 @@ const facialThirds = useMemo(() => {
     middlePercent: percent(middle),
     lowerPercent: percent(lower),
   };
-}, [points, mmPerPx]);
+}, [points, mmPerPx, fixedScale]);
   const scaleLabel = mmPerPx ? `Escala (vista): ${(1 / mmPerPx).toFixed(2)} px/mm · ${mmPerPx.toFixed(4)} mm/px` : "Sin calibrar";
 
   function setManualLink(url: string, name: string) { if (downloadHint?.url?.startsWith("blob:")) URL.revokeObjectURL(downloadHint.url); setDownloadHint({ url, name }); }
