@@ -168,6 +168,10 @@ function clinicalInterpretationForMeasure(name: string, value: number, units: st
 
 // Types
 type Pt = { x: number; y: number };
+type DockIconName = "image" | "ruler" | "sliders" | "user" | "target" | "table" | "clipboard";
+type AngleVisual =
+  | { kind: "vertex"; name: string; label: string; value: number; vertex: Pt; armA: Pt; armB: Pt }
+  | { kind: "lines"; name: string; label: string; value: number; lineA: [Pt, Pt]; lineB: [Pt, Pt] };
 type LandmarkKey =
   "S"|"N"|"A"|"B"|"Po"|"Or"|"Go"|"Me"|"Pg"|"Gn"|"Ar"|"U1T"|"U1A"|"L1T"|"L1A"|"Prn"|"PgS"|"Li"|"Tr"|"G"|"Sn"|"MeS"|"Ba"|"Pt"|"Co"|"Oc1"|"Oc2";
 
@@ -199,6 +203,25 @@ const LANDMARKS = [
   { key: "Co", label: "Co – Condylion", desc: "Punto más posterosuperior del cóndilo mandibular" },
   { key: "Oc1", label: "Oc1 – Oclusal anterior", desc: "Punto anterior sobre el plano oclusal (contacto incisivo)" },
   { key: "Oc2", label: "Oc2 – Oclusal posterior", desc: "Punto posterior sobre el plano oclusal (contacto molar)" },
+] as const;
+
+const ANGLE_OPTIONS = [
+  { name: "SNA", label: "SNA" },
+  { name: "SNB", label: "SNB" },
+  { name: "ANB", label: "ANB" },
+  { name: "SN–GoGn", label: "SN-GoGn" },
+  { name: "U1–NA (°)", label: "U1-NA" },
+  { name: "L1–NB (°)", label: "L1-NB" },
+  { name: "Interincisal", label: "Interincisal" },
+  { name: "Silla (N–S–Ar)", label: "Silla" },
+  { name: "Articular (S–Ar–Go)", label: "Articular" },
+  { name: "Gonial (Ar–Go–Me)", label: "Gonial" },
+  { name: "IMPA (°)", label: "IMPA" },
+  { name: "Beta Angle (°)", label: "Beta Angle" },
+  { name: "Plano Oclusal – SN (°)", label: "Oclusal-SN" },
+  { name: "FMA (°)", label: "FMA" },
+  { name: "Eje Facial (°)", label: "Eje Facial" },
+  { name: "U1–SN (°)", label: "U1-SN" },
 ] as const;
 
 const DEFAULT_NORMS = {
@@ -323,6 +346,7 @@ function CephTracer() {
   const [activeKey, setActiveKey] = useState<LandmarkKey | null>("S");
   const [placingMode, setPlacingMode] = useState<boolean>(true);
   const [showOverlay, setShowOverlay] = useState<boolean>(true);
+  const [visibleAngleName, setVisibleAngleName] = useState<string>("SNA");
   const [useSteiner, setUseSteiner] = useState<boolean>(true);
   const [useBjork, setUseBjork] = useState<boolean>(true);
   const [useExtended, setUseExtended] = useState<boolean>(true);
@@ -332,11 +356,21 @@ function CephTracer() {
   const [pFecha, setPFecha] = useState<string>(todayISO());
   const [pDoctor, setPDoctor] = useState<string>("");
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const lastImageSizeRef = useRef<{ width: number; height: number } | null>(null);
   const rafId = useRef<number | null>(null);
   const [downloadHint, setDownloadHint] = useState<{ url: string; name: string } | null>(null);
   const [lastCSV, setLastCSV] = useState<string | null>(null);
   const [fixedScale, setFixedScale] = useState<{ sx: number; sy: number } | null>(null);
+  const [isViewerFullscreen, setIsViewerFullscreen] = useState<boolean>(false);
+  const [isRadiographCollapsed, setIsRadiographCollapsed] = useState<boolean>(false);
+  const [isCalibrationCollapsed, setIsCalibrationCollapsed] = useState<boolean>(false);
+  const [isTemplatesCollapsed, setIsTemplatesCollapsed] = useState<boolean>(true);
+  const [isPatientCollapsed, setIsPatientCollapsed] = useState<boolean>(false);
+  const [isPointsCollapsed, setIsPointsCollapsed] = useState<boolean>(false);
+  const [isResultsCollapsed, setIsResultsCollapsed] = useState<boolean>(false);
+  const [isSummaryCollapsed, setIsSummaryCollapsed] = useState<boolean>(false);
 
   // Fijar escala real solo una vez, al cargar la imagen
 useEffect(() => {
@@ -351,6 +385,66 @@ useEffect(() => {
     }
   }
 }, [imgSrc]);
+  useEffect(() => {
+    lastImageSizeRef.current = null;
+  }, [imgSrc]);
+
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img || !imgSrc) return;
+
+    const syncRenderedImageSize = () => {
+      const rect = img.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+
+      const previous = lastImageSizeRef.current;
+      if (previous && (Math.abs(previous.width - rect.width) > 0.5 || Math.abs(previous.height - rect.height) > 0.5)) {
+        const sx = rect.width / previous.width;
+        const sy = rect.height / previous.height;
+        setPoints((current) => Object.fromEntries(
+          Object.entries(current).map(([key, value]) => [key, value ? { x: value.x * sx, y: value.y * sy } : value])
+        ) as Partial<Record<LandmarkKey, Pt>>);
+        setCalibClicks((current) => current.map((point) => ({ x: point.x * sx, y: point.y * sy })));
+      }
+
+      lastImageSizeRef.current = { width: rect.width, height: rect.height };
+      if (img.naturalWidth && img.naturalHeight) {
+        setFixedScale({ sx: img.naturalWidth / rect.width, sy: img.naturalHeight / rect.height });
+      }
+    };
+
+    syncRenderedImageSize();
+    const observer = new ResizeObserver(syncRenderedImageSize);
+    observer.observe(img);
+    window.addEventListener("resize", syncRenderedImageSize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncRenderedImageSize);
+    };
+  }, [imgSrc]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsViewerFullscreen(document.fullscreenElement === viewerRef.current);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  async function toggleViewerFullscreen() {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    try {
+      if (document.fullscreenElement === viewer) {
+        await document.exitFullscreen();
+      } else {
+        await viewer.requestFullscreen();
+      }
+    } catch {
+      setIsViewerFullscreen(false);
+    }
+  }
   useEffect(() => () => { window.removeEventListener("mousemove", onMove as any); window.removeEventListener("mouseup", onUp as any); if (rafId.current) cancelAnimationFrame(rafId.current); if (downloadHint?.url?.startsWith("blob:")) URL.revokeObjectURL(downloadHint.url); }, [downloadHint]);
 
   // "Tests" mínimos en runtime (no cambian comportamiento)
@@ -365,8 +459,8 @@ useEffect(() => {
     console.assert(interpWithTolerance(6.1, 4, "mm") === "mayor", "tol mm mayor");
   } catch {} }, []);
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setImgSrc(String(r.result)); r.readAsDataURL(f); }
-  function resetAll() { setPoints({}); setCalibClicks([]); setMmPerPx(null); }
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { setImgSrc(String(r.result)); setIsRadiographCollapsed(true); setIsCalibrationCollapsed(false); }; r.readAsDataURL(f); }
+  function resetAll() { setPoints({}); setCalibClicks([]); setMmPerPx(null); setIsCalibrationCollapsed(false); }
 
   function nextUnsetKey(current: LandmarkKey | null, tempPts: Partial<Record<LandmarkKey, Pt>>) {
   if (!current) return null;
@@ -385,7 +479,7 @@ useEffect(() => {
 
   function onCanvasClick(e: React.MouseEvent) {
     if (!imgRef.current) return; const rect = (e.target as HTMLElement).getBoundingClientRect(); const x = e.clientX - rect.left, y = e.clientY - rect.top; const pt = {x,y};
-    if (calibMode) { const next = [...calibClicks, pt].slice(-2); setCalibClicks(next); if (next.length===2) { const px = distance(toImageSpace(next[0]), toImageSpace(next[1])); if (mmKnown>0 && px>0){ setMmPerPx(mmKnown/px); setCalibMode(false);} } return; }
+    if (calibMode) { const next = [...calibClicks, pt].slice(-2); setCalibClicks(next); if (next.length===2) { const px = distance(toImageSpace(next[0]), toImageSpace(next[1])); if (mmKnown>0 && px>0){ setMmPerPx(mmKnown/px); setCalibMode(false); setIsCalibrationCollapsed(true);} } return; }
     if (placingMode && activeKey) {
       const temp = { ...points, [activeKey]: pt } as Partial<Record<LandmarkKey, Pt>>;
       setPoints(temp);
@@ -570,6 +664,36 @@ const facialThirds = useMemo(() => {
     lowerPercent: percent(lower),
   };
 }, [points, mmPerPx, fixedScale]);
+
+  const angleVisuals = useMemo<AngleVisual[]>(() => {
+    const list: AngleVisual[] = [];
+    const addVertex = (name: string, label: string, value: number, vertex?: Pt, armA?: Pt, armB?: Pt) => {
+      if (vertex && armA && armB) list.push({ kind: "vertex", name, label, value, vertex, armA, armB });
+    };
+    const addLines = (name: string, label: string, value: number, lineA?: [Pt, Pt] | null, lineB?: [Pt, Pt] | null) => {
+      if (lineA && lineB) list.push({ kind: "lines", name, label, value, lineA, lineB });
+    };
+
+    addVertex("SNA", "SNA", SNA, points.N, points.S, points.A);
+    addVertex("SNB", "SNB", SNB, points.N, points.S, points.B);
+    addVertex("ANB", "ANB", ANB, points.N, points.A, points.B);
+    addLines("SN–GoGn", "SN-GoGn", SN_GoGn, has("S") && has("N") ? [points.S!, points.N!] : null, has("Go") && has("Gn") ? [points.Go!, points.Gn!] : null);
+    addLines("U1–NA (°)", "U1-NA", U1_NA_deg, U1_axis, has("N") && has("A") ? [points.N!, points.A!] : null);
+    addLines("L1–NB (°)", "L1-NB", L1_NB_deg, L1_axis, has("N") && has("B") ? [points.N!, points.B!] : null);
+    addLines("Interincisal", "Interincisal", Interincisal, U1_axis, L1_axis);
+    addVertex("Silla (N–S–Ar)", "Silla", Saddle_NSAr, points.S, points.N, points.Ar);
+    addVertex("Articular (S–Ar–Go)", "Articular", Articular_SArGo, points.Ar, points.S, points.Go);
+    addVertex("Gonial (Ar–Go–Me)", "Gonial", Gonial_ArGoMe, points.Go, points.Ar, points.Me);
+    addLines("IMPA (°)", "IMPA", IMPA, has("L1T") && has("L1A") ? [points.L1T!, points.L1A!] : null, has("Go") && has("Gn") ? [points.Go!, points.Gn!] : null);
+    addVertex("Beta Angle (°)", "Beta Angle", Beta_Angle, points.Co, points.A, points.B);
+    addLines("Plano Oclusal – SN (°)", "Oclusal-SN", Ocl_SN, has("Oc1") && has("Oc2") ? [points.Oc1!, points.Oc2!] : null, has("S") && has("N") ? [points.S!, points.N!] : null);
+    addLines("FMA (°)", "FMA", FMA, has("Po") && has("Or") ? [points.Po!, points.Or!] : null, has("Go") && (has("Me") || has("Gn")) ? [points.Go!, (points.Me || points.Gn)!] : null);
+    addLines("Eje Facial (°)", "Eje Facial", Facial_Angle, has("Ba") && has("N") ? [points.Ba!, points.N!] : null, has("Pt") && has("Gn") ? [points.Pt!, points.Gn!] : null);
+    addLines("U1–SN (°)", "U1-SN", U1_SN, U1_axis, has("S") && has("N") ? [points.S!, points.N!] : null);
+    return list;
+  }, [ANB, Articular_SArGo, Beta_Angle, FMA, Facial_Angle, Gonial_ArGoMe, IMPA, Interincisal, L1_NB_deg, L1_axis, Ocl_SN, SNA, SNB, SN_GoGn, Saddle_NSAr, U1_NA_deg, U1_SN, U1_axis, points]);
+
+  const visibleAngle = angleVisuals.find((angle) => angle.name === visibleAngleName) || null;
   const scaleLabel = mmPerPx ? `Escala (vista): ${(1 / mmPerPx).toFixed(2)} px/mm · ${mmPerPx.toFixed(4)} mm/px` : "Sin calibrar";
 
   function setManualLink(url: string, name: string) { if (downloadHint?.url?.startsWith("blob:")) URL.revokeObjectURL(downloadHint.url); setDownloadHint({ url, name }); }
@@ -1751,55 +1875,148 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
   const resumen = `Paciente ${sexLabel?`(${sexLabel}) `:""}de ${pEdad||"—"} años, presenta maxilar superior: ${snaTxt}, y la mandíbula: ${snbTxt}. Presenta una relación esqueletal de tipo: ${anbClass}. El paciente tiene un crecimiento craneofacial de tipo: ${growthTxt}. Dentalmente encontramos a los incisivos superiores con una angulación: ${u1degTxt}, y una posición: ${u1mmTxt}. Los incisivos inferiores con una angulación: ${l1degTxt}, y una posición: ${l1mmTxt}. La relación interincisal: ${interTxt} y los labios en posición: ${lipsTxt}.`;
   const resumenExtendido = interpretacionExtendida();
   const resumenFinal = resumen + " " + resumenExtendido;
+  const collapsedModules = [
+    isRadiographCollapsed && { icon: "image", label: "Radiografía", onOpen: () => setIsRadiographCollapsed(false) },
+    isCalibrationCollapsed && { icon: "ruler", label: "Calibración", onOpen: () => setIsCalibrationCollapsed(false) },
+    isTemplatesCollapsed && { icon: "sliders", label: "Plantillas de análisis", onOpen: () => setIsTemplatesCollapsed(false) },
+    isPatientCollapsed && { icon: "user", label: "Datos del paciente", onOpen: () => setIsPatientCollapsed(false) },
+    isPointsCollapsed && { icon: "target", label: "Puntos cefalométricos", onOpen: () => setIsPointsCollapsed(false) },
+    isResultsCollapsed && { icon: "table", label: "Resultados", onOpen: () => setIsResultsCollapsed(false) },
+    isSummaryCollapsed && { icon: "clipboard", label: "Resumen clínico", onOpen: () => setIsSummaryCollapsed(false) },
+  ].filter(Boolean) as { icon: DockIconName; label: string; onOpen: () => void }[];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
       <div className="lg:col-span-4 space-y-4">
+       <ModuleDock modules={collapsedModules} />
+       {!isRadiographCollapsed && (
        <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50">
-  <h2 className="font-semibold mb-2">1) Radiografía</h2>
-  <input
-    type="file"
-    accept="image/*"
-    onChange={handleFile}
-    className="block w-full text-sm"
-  />
-  <div className="text-xs text-slate-400 mt-2">
-    Formatos soportados: JPG/PNG. Usa la mayor resolución posible.
-  </div>
-
-  <div className="mt-3">
+  <div className="flex items-center justify-between gap-3">
+    <div>
+      <h2 className="font-semibold">1) Radiografía</h2>
+      <div className="text-xs text-slate-400">{imgSrc ? "Cargada" : "Pendiente"}</div>
+    </div>
     <button
-      onClick={resetAll}
-      className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-medium text-slate-100"
+      type="button"
+      onClick={()=>setIsRadiographCollapsed((value)=>!value)}
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-slate-700 bg-slate-800 text-sm font-bold text-slate-100 hover:bg-slate-700"
+      aria-label={isRadiographCollapsed ? "Mostrar radiografía" : "Ocultar radiografía"}
+      title={isRadiographCollapsed ? "Mostrar" : "Ocultar"}
     >
-      Reiniciar trazado
+      {isRadiographCollapsed ? "+" : "-"}
     </button>
   </div>
+  {!isRadiographCollapsed && (<div className="mt-2">
+    <input
+      type="file"
+      accept="image/*"
+      onChange={handleFile}
+      className="block w-full text-sm"
+    />
+    <div className="text-xs text-slate-400 mt-2">
+      Formatos soportados: JPG/PNG. Usa la mayor resolución posible.
+    </div>
+
+    <div className="mt-3">
+      <button
+        onClick={resetAll}
+        className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-medium text-slate-100"
+      >
+        Reiniciar trazado
+      </button>
+    </div>
+  </div>)}
 </section>
+)}
+        {!isCalibrationCollapsed && (
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50">
-          <h2 className="font-semibold mb-2">2) Calibración</h2>
-          <p className="text-xs text-slate-400 mb-2">Haz <span className="text-sky-300">dos clics</span> sobre la regla y escribe la longitud real (mm).</p>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={()=>{ setCalibMode(true); setCalibClicks([]); }} className={`px-3 py-1.5 rounded-xl text-sm ${calibMode?"bg-emerald-600":"bg-slate-800 hover:bg-slate-700"}`}>{calibMode?"Calibrando… (haz dos clics)":"Iniciar calibración"}</button>
-            <label className="text-xs text-slate-400">Longitud real (mm)</label>
-            <input type="number" value={mmKnown} min={0.1} step={0.1} onChange={(e)=>setMmKnown(Number(e.target.value))} className="w-24 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-sm" />
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">2) Calibración</h2>
+              <div className="text-xs text-slate-400">{mmPerPx ? "Lista" : "Pendiente"}</div>
+            </div>
+            <button
+              type="button"
+              onClick={()=>setIsCalibrationCollapsed((value)=>!value)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-slate-700 bg-slate-800 text-sm font-bold text-slate-100 hover:bg-slate-700"
+              aria-label={isCalibrationCollapsed ? "Mostrar calibración" : "Ocultar calibración"}
+              title={isCalibrationCollapsed ? "Mostrar" : "Ocultar"}
+            >
+              {isCalibrationCollapsed ? "+" : "-"}
+            </button>
           </div>
-          <div className="text-xs text-slate-400 mt-2">{scaleLabel}</div>
-          {calibClicks.length===2 && (<div className="text-xs text-slate-400 mt-1">Distancia de referencia: {toFixedOrDash(distance(calibClicks[0], calibClicks[1]))} px</div>)}
+          {!isCalibrationCollapsed && (<div className="mt-2">
+            <p className="text-xs text-slate-400 mb-2">Haz <span className="text-sky-300">dos clics</span> sobre la regla y escribe la longitud real (mm).</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={()=>{ setCalibMode(true); setCalibClicks([]); setIsCalibrationCollapsed(false); }} className={`px-3 py-1.5 rounded-xl text-sm ${calibMode?"bg-emerald-600":"bg-slate-800 hover:bg-slate-700"}`}>{calibMode?"Calibrando... (haz dos clics)":"Iniciar calibración"}</button>
+              <label className="text-xs text-slate-400">Longitud real (mm)</label>
+              <input type="number" value={mmKnown} min={0.1} step={0.1} onChange={(e)=>setMmKnown(Number(e.target.value))} className="w-24 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-sm" />
+            </div>
+            <div className="text-xs text-slate-400 mt-2">{scaleLabel}</div>
+            {calibClicks.length===2 && (<div className="text-xs text-slate-400 mt-1">Distancia de referencia: {toFixedOrDash(distance(calibClicks[0], calibClicks[1]))} px</div>)}
+          </div>)}
         </section>
+)}
+        {!isTemplatesCollapsed && (
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50">
-          <h2 className="font-semibold mb-2">3) Plantillas de análisis</h2>
-          <div className="flex flex-col gap-2 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold">3) Plantillas de análisis</h2>
+              <div className="text-xs text-slate-400">{[useSteiner && "Steiner", useBjork && "Björk", useExtended && "Otras"].filter(Boolean).join(", ")}</div>
+            </div>
+            <button
+              type="button"
+              onClick={()=>setIsTemplatesCollapsed((value)=>!value)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-slate-700 bg-slate-800 text-sm font-bold text-slate-100 hover:bg-slate-700"
+              aria-label={isTemplatesCollapsed ? "Mostrar plantillas" : "Ocultar plantillas"}
+              title={isTemplatesCollapsed ? "Mostrar" : "Ocultar"}
+            >
+              {isTemplatesCollapsed ? "+" : "-"}
+            </button>
+          </div>
+          {!isTemplatesCollapsed && (<div className="mt-2 flex flex-col gap-2 text-sm">
             <label className="inline-flex items-center gap-2"><input type="checkbox" checked={useSteiner} onChange={e=>setUseSteiner(e.target.checked)} /> Steiner</label>
             <label className="inline-flex items-center gap-2"><input type="checkbox" checked={useBjork} onChange={e=>setUseBjork(e.target.checked)} /> Björk–Jarabak</label>
-            <label className="inline-flex items-center gap-2"><input type="checkbox" checked={showOverlay} onChange={e=>setShowOverlay(e.target.checked)} /> Mostrar overlay</label>
+            <label className="inline-flex items-center gap-2"><input type="checkbox" checked={showOverlay} onChange={e=>setShowOverlay(e.target.checked)} /> Mostrar trazos base</label>
             <label className="inline-flex items-center gap-2">
   <input type="checkbox" checked={useExtended} onChange={e=>setUseExtended(e.target.checked)} /> Otras medidas
 </label>
-          </div>
+            <label className="flex flex-col gap-1 text-xs text-slate-400">
+              Ángulo visible
+              <select
+                value={visibleAngleName}
+                onChange={(e)=>setVisibleAngleName(e.target.value)}
+                className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-sm text-slate-100"
+              >
+                <option value="">Ninguno</option>
+                {ANGLE_OPTIONS.map((option) => {
+                  const angle = angleVisuals.find((item) => item.name === option.name);
+                  return (
+                  <option key={option.name} value={option.name}>
+                    {option.label} {angle && !Number.isNaN(angle.value) ? `(${toFixedOrDash(angle.value)}°)` : "(pendiente)"}
+                  </option>
+                  );
+                })}
+              </select>
+            </label>
+          </div>)}
         </section>
+)}
+        {!isPatientCollapsed && (
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50">
-          <h2 className="font-semibold mb-2">4) Datos del paciente</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">4) Datos del paciente</h2>
+            <button
+              type="button"
+              onClick={()=>setIsPatientCollapsed((value)=>!value)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-slate-700 bg-slate-800 text-sm font-bold text-slate-100 hover:bg-slate-700"
+              aria-label={isPatientCollapsed ? "Mostrar datos del paciente" : "Ocultar datos del paciente"}
+              title={isPatientCollapsed ? "Mostrar" : "Ocultar"}
+            >
+              {isPatientCollapsed ? "+" : "-"}
+            </button>
+          </div>
+          {!isPatientCollapsed && (
           <div className="grid grid-cols-2 gap-2 text-sm">
             <label className="col-span-2">Nombre<input value={pNombre} onChange={e=>setPNombre(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1"/></label>
             <label>Edad<input type="number" min={0} max={120} value={pEdad} onChange={e=>setPEdad(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1"/></label>
@@ -1807,9 +2024,25 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
             <label>Fecha<input type="date" value={pFecha} onChange={e=>setPFecha(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1"/></label>
             <label className="col-span-2">Doctor<input value={pDoctor} onChange={e=>setPDoctor(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1"/></label>
           </div>
+          )}
         </section>
+)}
+        {!isPointsCollapsed && (
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50">
-          <h2 className="font-semibold mb-2">5) Puntos cefalométricos</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">5) Puntos cefalométricos</h2>
+            <button
+              type="button"
+              onClick={()=>setIsPointsCollapsed((value)=>!value)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-slate-700 bg-slate-800 text-sm font-bold text-slate-100 hover:bg-slate-700"
+              aria-label={isPointsCollapsed ? "Mostrar puntos cefalométricos" : "Ocultar puntos cefalométricos"}
+              title={isPointsCollapsed ? "Mostrar" : "Ocultar"}
+            >
+              {isPointsCollapsed ? "+" : "-"}
+            </button>
+          </div>
+          {!isPointsCollapsed && (
+          <div className="mt-2">
           <div className="flex items-center gap-2 mb-2"><label className="text-xs text-slate-400">Modo de colocación</label><input type="checkbox" checked={placingMode} onChange={e=>setPlacingMode(e.target.checked)} /><span className="text-xs text-slate-400">(Click para colocar / arrastrar para ajustar)</span></div>
           <ul className="space-y-1 max-h-64 overflow-auto pr-1">
             {LANDMARKS.map(lm=>{ const selected = activeKey===lm.key; const isSet = Boolean(points[lm.key]); return (
@@ -1819,9 +2052,26 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
               </li>
             ); })}
           </ul>
+          </div>
+          )}
         </section>
+)}
+        {!isResultsCollapsed && (
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50">
-          <h2 className="font-semibold mb-2">6) Resultados</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">6) Resultados</h2>
+            <button
+              type="button"
+              onClick={()=>setIsResultsCollapsed((value)=>!value)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-slate-700 bg-slate-800 text-sm font-bold text-slate-100 hover:bg-slate-700"
+              aria-label={isResultsCollapsed ? "Mostrar resultados" : "Ocultar resultados"}
+              title={isResultsCollapsed ? "Mostrar" : "Ocultar"}
+            >
+              {isResultsCollapsed ? "+" : "-"}
+            </button>
+          </div>
+          {!isResultsCollapsed && (
+          <div className="mt-2">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
 
@@ -1838,39 +2088,39 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
 
               <tbody className="text-slate-200">
                 {useSteiner && (<>
-                  <tr><td colSpan={5} className="pt-2 text-sky-300">— Steiner —</td></tr>
-                  <RowZInt name="SNA" value={SNA} units="°" norm={DEFAULT_NORMS.steiner.SNA} />
-                  <RowZInt name="SNB" value={SNB} units="°" norm={DEFAULT_NORMS.steiner.SNB} />
-                  <RowZInt name="ANB" value={ANB} units="°" norm={DEFAULT_NORMS.steiner.ANB} />
-                  <RowZInt name="SN–GoGn" value={SN_GoGn} units="°" norm={DEFAULT_NORMS.steiner.SN_GoGn} />
-                  <RowZInt name="U1–NA (°)" value={U1_NA_deg} units="°" norm={DEFAULT_NORMS.steiner.U1_NA_deg} />
+                  <tr><td colSpan={6} className="pt-2 text-sky-300">— Steiner —</td></tr>
+                  <RowZInt name="SNA" value={SNA} units="°" norm={DEFAULT_NORMS.steiner.SNA} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "SNA"} />
+                  <RowZInt name="SNB" value={SNB} units="°" norm={DEFAULT_NORMS.steiner.SNB} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "SNB"} />
+                  <RowZInt name="ANB" value={ANB} units="°" norm={DEFAULT_NORMS.steiner.ANB} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "ANB"} />
+                  <RowZInt name="SN–GoGn" value={SN_GoGn} units="°" norm={DEFAULT_NORMS.steiner.SN_GoGn} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "SN–GoGn"} />
+                  <RowZInt name="U1–NA (°)" value={U1_NA_deg} units="°" norm={DEFAULT_NORMS.steiner.U1_NA_deg} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "U1–NA (°)"} />
                   <RowZInt name="U1–NA (mm)" value={U1_NA_mm} units="mm" norm={DEFAULT_NORMS.steiner.U1_NA_mm} zEnabled={Boolean(mmPerPx)} />
-                  <RowZInt name="L1–NB (°)" value={L1_NB_deg} units="°" norm={DEFAULT_NORMS.steiner.L1_NB_deg} />
+                  <RowZInt name="L1–NB (°)" value={L1_NB_deg} units="°" norm={DEFAULT_NORMS.steiner.L1_NB_deg} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "L1–NB (°)"} />
                   <RowZInt name="L1–NB (mm)" value={L1_NB_mm} units="mm" norm={DEFAULT_NORMS.steiner.L1_NB_mm} zEnabled={Boolean(mmPerPx)} />
-                  <RowZInt name="Interincisal" value={Interincisal} units="°" norm={DEFAULT_NORMS.steiner.Interincisal} />
+                  <RowZInt name="Interincisal" value={Interincisal} units="°" norm={DEFAULT_NORMS.steiner.Interincisal} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "Interincisal"} />
                   <RowZInt name="Pg–NB (±)" value={Pg_NB_mm} units="mm" norm={DEFAULT_NORMS.steiner.Pg_NB_mm} zEnabled={Boolean(mmPerPx)} />
                 </>)}
                 {useBjork && (<>
-                  <tr><td colSpan={5} className="pt-2 text-sky-300">— Björk–Jarabak —</td></tr>
-                  <RowZInt name="Silla (N–S–Ar)" value={Saddle_NSAr} units="°" norm={DEFAULT_NORMS.bjork.Saddle_NSAr} />
-                  <RowZInt name="Articular (S–Ar–Go)" value={Articular_SArGo} units="°" norm={DEFAULT_NORMS.bjork.Articular_SArGo} />
-                  <RowZInt name="Gonial (Ar–Go–Me)" value={Gonial_ArGoMe} units="°" norm={DEFAULT_NORMS.bjork.Gonial_ArGoMe} />
+                  <tr><td colSpan={6} className="pt-2 text-sky-300">— Björk–Jarabak —</td></tr>
+                  <RowZInt name="Silla (N–S–Ar)" value={Saddle_NSAr} units="°" norm={DEFAULT_NORMS.bjork.Saddle_NSAr} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "Silla (N–S–Ar)"} />
+                  <RowZInt name="Articular (S–Ar–Go)" value={Articular_SArGo} units="°" norm={DEFAULT_NORMS.bjork.Articular_SArGo} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "Articular (S–Ar–Go)"} />
+                  <RowZInt name="Gonial (Ar–Go–Me)" value={Gonial_ArGoMe} units="°" norm={DEFAULT_NORMS.bjork.Gonial_ArGoMe} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "Gonial (Ar–Go–Me)"} />
                   <RowZInt name="Suma Björk" value={Sum_Bjork} units="°" norm={DEFAULT_NORMS.bjork.Sum_Bjork} />
                   <RowZInt name="Jarabak % (S–Go/N–Me)" value={Jarabak_Ratio} units="%" norm={DEFAULT_NORMS.bjork.Jarabak_Ratio} />
                 </>)}
                 {useExtended && (<>
-                <tr><td colSpan={5} className="pt-2 text-sky-300">— Otras medidas —</td></tr>
-<RowZInt name="IMPA (°)" value={IMPA} units="°" norm={DEFAULT_NORMS.extended.IMPA} />
+                <tr><td colSpan={6} className="pt-2 text-sky-300">— Otras medidas —</td></tr>
+<RowZInt name="IMPA (°)" value={IMPA} units="°" norm={DEFAULT_NORMS.extended.IMPA} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "IMPA (°)"} />
 <RowZInt name="Wits (mm)" value={Wits} units="mm" norm={DEFAULT_NORMS.extended.Wits} />
-<RowZInt name="Beta Angle (°)" value={Beta_Angle} units="°" norm={DEFAULT_NORMS.extended.Beta_Angle} />
-<RowZInt name="Plano Oclusal – SN (°)" value={Ocl_SN} units="°" norm={DEFAULT_NORMS.extended.Ocl_SN} />
-<RowZInt name="FMA (°)" value={FMA} units="°" norm={{ mean: 26, sd: 4 }} />
+<RowZInt name="Beta Angle (°)" value={Beta_Angle} units="°" norm={DEFAULT_NORMS.extended.Beta_Angle} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "Beta Angle (°)"} />
+<RowZInt name="Plano Oclusal – SN (°)" value={Ocl_SN} units="°" norm={DEFAULT_NORMS.extended.Ocl_SN} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "Plano Oclusal – SN (°)"} />
+<RowZInt name="FMA (°)" value={FMA} units="°" norm={{ mean: 26, sd: 4 }} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "FMA (°)"} />
 <RowZInt name="Overjet estimado (mm)" value={incisalOverlap.overjet} units="mm" norm={{ mean: 2.5, sd: 1 }} zEnabled={Boolean(mmPerPx)} />
 <RowZInt name="Overbite estimado (mm)" value={incisalOverlap.overbite} units="mm" norm={{ mean: 3, sd: 1 }} zEnabled={Boolean(mmPerPx)} />
-<RowZInt name="Eje Facial (°)" value={Facial_Angle} units="°" norm={DEFAULT_NORMS.extended.Facial_Angle} />
-<RowZInt name="U1–SN (°)" value={U1_SN} units="°" norm={DEFAULT_NORMS.extended.U1_SN} />
+<RowZInt name="Eje Facial (°)" value={Facial_Angle} units="°" norm={DEFAULT_NORMS.extended.Facial_Angle} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "Eje Facial (°)"} />
+<RowZInt name="U1–SN (°)" value={U1_SN} units="°" norm={DEFAULT_NORMS.extended.U1_SN} onShowAngle={setVisibleAngleName} isActiveAngle={visibleAngleName === "U1–SN (°)"} />
                 </>)}
-                <tr><td colSpan={5} className="pt-2 text-sky-300">— Tejidos blandos —</td></tr>
+                <tr><td colSpan={6} className="pt-2 text-sky-300">— Tejidos blandos —</td></tr>
                 <RowZInt name="Labio inf – E-line (±)" value={ELine_Li_mm} units="mm" norm={DEFAULT_NORMS.soft.ELine_Li_mm} zEnabled={Boolean(mmPerPx)} />
                 <RowThird name="Tercio superior (Tr–G)" mmValue={facialThirds.upper} percentValue={facialThirds.upperPercent} />
                 <RowThird name="Tercio medio (G–Sn)" mmValue={facialThirds.middle} percentValue={facialThirds.middlePercent} />
@@ -1905,14 +2155,20 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
               </div>
             </div>
           )}
+          </div>
+          )}
         </section>
+)}
       </div>
 
       {/* Lienzo */}
       <div className="lg:col-span-8">
-        <section className="rounded-2xl border border-slate-800 p-2 bg-slate-900/50">
+        <section
+          ref={viewerRef}
+          className={`rounded-2xl border border-slate-800 bg-slate-900/50 ${isViewerFullscreen ? "h-screen overflow-auto p-3 bg-slate-950" : "p-2"}`}
+        >
           {/* Indicador superior contextual */}
-<div className="mb-2 text-center">
+<div className="mb-2 flex flex-wrap items-center justify-center gap-2">
   <div
     className="inline-block px-4 py-2 rounded-xl border text-sm font-medium shadow-md transition-all duration-300"
     style={{
@@ -1958,12 +2214,25 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
       </span>
     )}
   </div>
+  <button
+    type="button"
+    onClick={toggleViewerFullscreen}
+    className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-sm font-medium text-slate-100 hover:bg-slate-700"
+  >
+    {isViewerFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+  </button>
 </div>
           <div className="relative w-full overflow-auto rounded-xl" ref={containerRef}>
             {imgSrc ? (
               <div className="relative inline-block" onClick={onCanvasClick}>
-                <img ref={imgRef} src={imgSrc} alt="Radiografía" className="block max-w-full h-auto select-none" />
+                <img
+                  ref={imgRef}
+                  src={imgSrc}
+                  alt="Radiografía"
+                  className={`block max-w-full h-auto select-none ${isViewerFullscreen ? "max-h-[calc(100vh-5rem)] w-auto" : ""}`}
+                />
                 <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+                  {showOverlay && (<>
                   {has("S") && has("N") && (<line x1={points.S!.x} y1={points.S!.y} x2={points.N!.x} y2={points.N!.y} stroke="#38bdf8" strokeWidth={2} />)}
                   {has("N") && has("A") && (<line x1={points.N!.x} y1={points.N!.y} x2={points.A!.x} y2={points.A!.y} stroke="#22c55e" strokeWidth={2} />)}
                   {has("N") && has("B") && (<line x1={points.N!.x} y1={points.N!.y} x2={points.B!.x} y2={points.B!.y} stroke="#f97316" strokeWidth={2} />)}
@@ -1977,10 +2246,12 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
                   {has("Oc1") && has("Oc2") && (<line x1={points.Oc1!.x} y1={points.Oc1!.y} x2={points.Oc2!.x} y2={points.Oc2!.y} stroke="#f59e0b" strokeDasharray="4 3" strokeWidth={2} />)}
                   {/* E-line */}
                   {has("Prn") && has("PgS") && (<line x1={points.Prn!.x} y1={points.Prn!.y} x2={points.PgS!.x} y2={points.PgS!.y} stroke="#60a5fa" strokeDasharray="6 4" strokeWidth={2} />)}
+                  </>)}
                   {LANDMARKS.map(({ key, label }) => { const p = points[key]; if (!p) return null; const isActive = activeKey === key; return (
                     <g key={key} className="cursor-move pointer-events-auto" onMouseDown={(e)=>onPointMouseDown(key, e)}>
-                      <circle cx={p.x} cy={p.y} r={6} fill={isActive?"#38bdf8":"#94a3b8"} stroke="#0f172a" strokeWidth={2} />
-                      <text x={p.x + 8} y={p.y - 8} fontSize={12} fill="#e2e8f0" stroke="#0f172a" strokeWidth={0.5}>{label.split(" ")[0]}</text>
+                      <circle cx={p.x} cy={p.y} r={8} fill="transparent" />
+                      <circle cx={p.x} cy={p.y} r={isActive ? 5 : 4} fill={isActive?"#38bdf8":"#94a3b8"} stroke="#0f172a" strokeWidth={1.5} />
+                      <text x={p.x + 6} y={p.y - 6} fontSize={10} fill="#e2e8f0" stroke="#0f172a" strokeWidth={0.45}>{label.split(" ")[0]}</text>
                     </g>
                   ); })}
                   
@@ -1989,7 +2260,7 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
     <circle
       cx={calibClicks[0].x}
       cy={calibClicks[0].y}
-      r={5}
+      r={4}
       fill="#22c55e"
     />
     {calibClicks[1] && (
@@ -1997,7 +2268,7 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
         <circle
           cx={calibClicks[1].x}
           cy={calibClicks[1].y}
-          r={5}
+          r={4}
           fill="#22c55e"
         />
         <line
@@ -2027,39 +2298,31 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
   </g>
 )}
 
-                  {showOverlay && has("S") && has("N") && has("A") && (<g>
-                    <path d={arcPath(points.N!, points.S!, points.A!)} stroke="#22c55e" strokeWidth={2} fill="none" strokeDasharray="4 3" />
-                    <AngleLabel p={{ x: points.N!.x + 40, y: points.N!.y - 10 }} text={`SNA ${toFixedOrDash(SNA)}`} />
-                  </g>)}
-                  {showOverlay && has("S") && has("N") && has("B") && (<g>
-                    <path d={arcPath(points.N!, points.S!, points.B!)} stroke="#f97316" strokeWidth={2} fill="none" strokeDasharray="4 3" />
-                    <AngleLabel p={{ x: points.N!.x + 40, y: points.N!.y + 12 }} text={`SNB ${toFixedOrDash(SNB)}`} />
-                  </g>)}
-                  {showOverlay && has("N") && has("A") && has("B") && (<g>
-                    <path d={arcPath(points.N!, points.A!, points.B!)} stroke="#38bdf8" strokeWidth={2} fill="none" strokeDasharray="4 3" />
-                    <AngleLabel p={{ x: points.N!.x - 60, y: points.N!.y - 12 }} text={`ANB ${toFixedOrDash(ANB)}`} />
-                  </g>)}
-                  {showOverlay && has("N") && has("S") && has("Ar") && (<g>
-                    <path d={arcPath(points.S!, points.N!, points.Ar!)} stroke="#16a34a" strokeWidth={2} fill="none" strokeDasharray="4 3" />
-                    <AngleLabel p={{ x: points.S!.x + 40, y: points.S!.y - 10 }} text={`Silla ${toFixedOrDash(Saddle_NSAr)}`} />
-                  </g>)}
-                  {showOverlay && has("S") && has("Ar") && has("Go") && (<g>
-                    <path d={arcPath(points.Ar!, points.S!, points.Go!)} stroke="#d946ef" strokeWidth={2} fill="none" strokeDasharray="4 3" />
-                    <AngleLabel p={{ x: points.Ar!.x + 40, y: points.Ar!.y - 10 }} text={`Articular ${toFixedOrDash(Articular_SArGo)}`} />
-                  </g>)}
-                  {showOverlay && has("Ar") && has("Go") && has("Me") && (<g>
-                    <path d={arcPath(points.Go!, points.Ar!, points.Me!)} stroke="#fb7185" strokeWidth={2} fill="none" strokeDasharray="4 3" />
-                    <AngleLabel p={{ x: points.Go!.x + 40, y: points.Go!.y - 10 }} text={`Gonial ${toFixedOrDash(Gonial_ArGoMe)}`} />
-                  </g>)}
+                  <SelectedAngleOverlay angle={visibleAngle} />
                 </svg>
               </div>
             ) : (<div className="aspect-video w-full grid place-items-center text-slate-400"><p>Sube una radiografía para comenzar.</p></div>)}
           </div>
         </section>
+        {!isSummaryCollapsed && (
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
-          <h2 className="font-semibold mb-2">7) Resumen clínico</h2>
-         <p className="text-sm text-slate-200 leading-6 whitespace-pre-line lg:text-justify">{resumenFinal}</p>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">7) Resumen clínico</h2>
+            <button
+              type="button"
+              onClick={()=>setIsSummaryCollapsed((value)=>!value)}
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-slate-700 bg-slate-800 text-sm font-bold text-slate-100 hover:bg-slate-700"
+              aria-label={isSummaryCollapsed ? "Mostrar resumen clínico" : "Ocultar resumen clínico"}
+              title={isSummaryCollapsed ? "Mostrar" : "Ocultar"}
+            >
+              {isSummaryCollapsed ? "+" : "-"}
+            </button>
+          </div>
+          {!isSummaryCollapsed && (
+         <p className="mt-2 text-sm text-slate-200 leading-6 whitespace-pre-line lg:text-justify">{resumenFinal}</p>
+          )}
         </section>
+)}
         {/* 8) Donaciones */}
         <section className="rounded-2xl border border-slate-800 p-4 bg-slate-900/50 mt-3">
           <h2 className="font-semibold mb-2">8) Apoya el proyecto</h2>
@@ -2088,20 +2351,126 @@ const fmaState = interpWithTolerance(FMA, 26, "°");
   );
 }
 
+function ModuleDock({ modules }: { modules: { icon: DockIconName; label: string; onOpen: () => void }[] }) {
+  if (!modules.length) return null;
+
+  return (
+    <div className="sticky top-2 z-20 flex flex-wrap gap-1.5 rounded-xl border border-slate-800 bg-slate-950/90 p-2 shadow-lg shadow-slate-950/30 backdrop-blur">
+      {modules.map((module) => (
+        <button
+          key={module.label}
+          type="button"
+          onClick={module.onOpen}
+          className="grid h-8 min-w-8 place-items-center rounded-lg border border-slate-700 bg-slate-800 px-2 text-xs font-bold text-slate-100 hover:bg-sky-700"
+          aria-label={`Mostrar ${module.label}`}
+          title={module.label}
+        >
+          <DockIcon name={module.icon} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DockIcon({ name }: { name: DockIconName }) {
+  const common = {
+    width: 18,
+    height: 18,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  if (name === "image") {
+    return (
+      <svg {...common}>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <circle cx="8" cy="10" r="1.5" />
+        <path d="M21 16l-5-5-4 4-2-2-5 5" />
+      </svg>
+    );
+  }
+  if (name === "ruler") {
+    return (
+      <svg {...common}>
+        <path d="M4 17l13-13 3 3L7 20l-3-3z" />
+        <path d="M14 6l2 2M11 9l2 2M8 12l2 2" />
+      </svg>
+    );
+  }
+  if (name === "sliders") {
+    return (
+      <svg {...common}>
+        <path d="M4 7h7M15 7h5M4 17h5M13 17h7" />
+        <circle cx="13" cy="7" r="2" />
+        <circle cx="11" cy="17" r="2" />
+      </svg>
+    );
+  }
+  if (name === "user") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c1.5-4 14.5-4 16 0" />
+      </svg>
+    );
+  }
+  if (name === "target") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="8" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+      </svg>
+    );
+  }
+  if (name === "table") {
+    return (
+      <svg {...common}>
+        <rect x="4" y="5" width="16" height="14" rx="2" />
+        <path d="M4 10h16M9 5v14M15 5v14" />
+      </svg>
+    );
+  }
+  if (name === "clipboard") {
+    return (
+      <svg {...common}>
+        <path d="M9 4h6l1 2h2v15H6V6h2l1-2z" />
+        <path d="M9 11h6M9 15h6" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M9 4h6l1 2h2v15H6V6h2l1-2z" />
+      <path d="M9 11h6M9 15h6" />
+    </svg>
+  );
+}
+
 function RowZInt({
   name,
   value,
   units,
   norm,
   zEnabled = true,
+  onShowAngle,
+  isActiveAngle = false,
 }: {
   name: string;
   value: number;
   units: string;
   norm: { mean: number; sd: number };
   zEnabled?: boolean;
+  onShowAngle?: (name: string) => void;
+  isActiveAngle?: boolean;
 }) {
   const ok = !Number.isNaN(value);
+  const canShowAngle = units.includes("°") && Boolean(onShowAngle);
   const zz = ok && zEnabled ? zScore(value, norm.mean, norm.sd) : NaN;
   const tol = toleranceForUnits(units);
   const delta = ok ? value - norm.mean : NaN;
@@ -2116,7 +2485,11 @@ function RowZInt({
   const interp = clinicalInterpretationForMeasure(name, value, units, zEnabled);
 
   return (
-    <tr className="border-t border-slate-800">
+    <tr
+      className={`border-t border-slate-800 ${canShowAngle ? "cursor-pointer hover:bg-slate-800/70" : ""} ${isActiveAngle ? "bg-sky-950/60" : ""}`}
+      onClick={canShowAngle ? () => onShowAngle?.(name) : undefined}
+      title={canShowAngle ? "Mostrar este ángulo en el trazado" : undefined}
+    >
       <td className="py-1 pr-4 text-slate-300">{name}</td>
       <td className={`py-1 pr-4 text-right ${ok ? "text-slate-100" : "text-slate-500"}`}>
         {toFixedOrDash(value)}
@@ -2153,4 +2526,76 @@ function RowThird({ name, mmValue, percentValue }: { name: string; mmValue: numb
   );
 }
 
-function AngleLabel({ p, text }: { p: Pt; text: string }) { return (<text x={p.x} y={p.y} fontSize={12} fill="#e2e8f0" stroke="#0f172a" strokeWidth={0.5}>{text}</text>); }
+function lineIntersection(a1: Pt, a2: Pt, b1: Pt, b2: Pt): Pt | null {
+  const x1 = a1.x, y1 = a1.y, x2 = a2.x, y2 = a2.y;
+  const x3 = b1.x, y3 = b1.y, x4 = b2.x, y4 = b2.y;
+  const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(den) < 1e-8) return null;
+  return {
+    x: ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den,
+    y: ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den,
+  };
+}
+
+function pointAlongLine(origin: Pt, through: Pt, length: number): Pt {
+  const dx = through.x - origin.x;
+  const dy = through.y - origin.y;
+  const mag = Math.hypot(dx, dy) || 1;
+  return { x: origin.x + (dx / mag) * length, y: origin.y + (dy / mag) * length };
+}
+
+function midPoint(a: Pt, b: Pt): Pt {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+function SelectedAngleOverlay({ angle }: { angle: AngleVisual | null }) {
+  if (!angle) return null;
+
+  const color = "#facc15";
+  const dash = "7 5";
+  const label = `${angle.label} ${toFixedOrDash(angle.value)}°`;
+
+  if (angle.kind === "vertex") {
+    const armA = pointAlongLine(angle.vertex, angle.armA, 70);
+    const armB = pointAlongLine(angle.vertex, angle.armB, 70);
+    const labelPoint = midPoint(pointAlongLine(angle.vertex, angle.armA, 92), pointAlongLine(angle.vertex, angle.armB, 92));
+    return (
+      <g>
+        <line x1={angle.vertex.x} y1={angle.vertex.y} x2={angle.armA.x} y2={angle.armA.y} stroke={color} strokeWidth={3} strokeDasharray={dash} />
+        <line x1={angle.vertex.x} y1={angle.vertex.y} x2={angle.armB.x} y2={angle.armB.y} stroke={color} strokeWidth={3} strokeDasharray={dash} />
+        <path d={arcPath(angle.vertex, armA, armB, 34)} stroke={color} strokeWidth={3} fill="none" strokeDasharray="4 4" />
+        <AngleBadge p={labelPoint} text={label} />
+      </g>
+    );
+  }
+
+  const [a1, a2] = angle.lineA;
+  const [b1, b2] = angle.lineB;
+  const vertex = lineIntersection(a1, a2, b1, b2);
+  const labelPoint = vertex || midPoint(midPoint(a1, a2), midPoint(b1, b2));
+
+  return (
+    <g>
+      <line x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y} stroke={color} strokeWidth={3} strokeDasharray={dash} />
+      <line x1={b1.x} y1={b1.y} x2={b2.x} y2={b2.y} stroke={color} strokeWidth={3} strokeDasharray={dash} />
+      {vertex && (
+        <path
+          d={arcPath(vertex, pointAlongLine(vertex, a2, 70), pointAlongLine(vertex, b2, 70), 34)}
+          stroke={color}
+          strokeWidth={3}
+          fill="none"
+          strokeDasharray="4 4"
+        />
+      )}
+      <AngleBadge p={{ x: labelPoint.x + 12, y: labelPoint.y - 12 }} text={label} />
+    </g>
+  );
+}
+
+function AngleBadge({ p, text }: { p: Pt; text: string }) {
+  return (
+    <text x={p.x} y={p.y} fontSize={13} fontWeight={700} fill="#fde68a" stroke="#0f172a" strokeWidth={0.8}>
+      {text}
+    </text>
+  );
+}
